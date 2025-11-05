@@ -1,4 +1,4 @@
-use datatypes::{ConcreteDatatype, DataType, Value, Int64Type, Float64Type, StringType};
+use datatypes::{ConcreteDatatype, DataType, Value, Int64Type, Float32Type, Float64Type, StringType};
 
 /// Unary function that takes one argument
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,39 +55,91 @@ impl UnaryFunc {
                 }
             }
             Self::Cast(to) => {
-                // For simplicity, we'll do basic type conversions
-                // In a real implementation, this would use proper type casting
-                let arg_clone = arg.clone();
-                match (arg, to) {
-                    (Value::Int64(v), ConcreteDatatype::Int64(_)) => Ok(Value::Int64(v)),
-                    (Value::Float64(v), ConcreteDatatype::Float64(_)) => Ok(Value::Float64(v)),
-                    (Value::String(s), ConcreteDatatype::String(_)) => Ok(Value::String(s)),
-                    (Value::Bool(b), ConcreteDatatype::Bool(_)) => Ok(Value::Bool(b)),
-                    (Value::Int64(v), ConcreteDatatype::Float64(_)) => Ok(Value::Float64(v as f64)),
-                    (Value::Float64(v), ConcreteDatatype::Int64(_)) => Ok(Value::Int64(v as i64)),
-                    (Value::Int64(v), ConcreteDatatype::String(_)) => Ok(Value::String(v.to_string())),
-                    (Value::Float64(v), ConcreteDatatype::String(_)) => Ok(Value::String(v.to_string())),
-                    (Value::Bool(v), ConcreteDatatype::String(_)) => Ok(Value::String(v.to_string())),
-                    (Value::String(s), ConcreteDatatype::Int64(_)) => {
-                        s.parse::<i64>()
-                            .map(Value::Int64)
-                            .map_err(|_| EvalError::CastFailed {
-                                from: format!("{:?}", arg_clone),
-                                to: format!("{:?}", to),
-                            })
-                    }
-                    (Value::String(s), ConcreteDatatype::Float64(_)) => {
-                        s.parse::<f64>()
-                            .map(Value::Float64)
-                            .map_err(|_| EvalError::CastFailed {
-                                from: format!("{:?}", arg_clone),
-                                to: format!("{:?}", to),
-                            })
-                    }
-                    _ => Err(EvalError::CastFailed {
-                        from: format!("{:?}", arg_clone),
+                // Use the DataType's try_cast method for proper type casting
+                match to {
+                    ConcreteDatatype::Int8(t) => t.try_cast(arg.clone()).ok_or_else(|| EvalError::CastFailed {
+                        from: format!("{:?}", arg),
                         to: format!("{:?}", to),
                     }),
+                    ConcreteDatatype::Int16(t) => t.try_cast(arg.clone()).ok_or_else(|| EvalError::CastFailed {
+                        from: format!("{:?}", arg),
+                        to: format!("{:?}", to),
+                    }),
+                    ConcreteDatatype::Int32(t) => t.try_cast(arg.clone()).ok_or_else(|| EvalError::CastFailed {
+                        from: format!("{:?}", arg),
+                        to: format!("{:?}", to),
+                    }),
+                    ConcreteDatatype::Int64(t) => t.try_cast(arg.clone()).ok_or_else(|| EvalError::CastFailed {
+                        from: format!("{:?}", arg),
+                        to: format!("{:?}", to),
+                    }),
+                    ConcreteDatatype::Float32(t) => t.try_cast(arg.clone()).ok_or_else(|| EvalError::CastFailed {
+                        from: format!("{:?}", arg),
+                        to: format!("{:?}", to),
+                    }),
+                    ConcreteDatatype::Float64(t) => t.try_cast(arg.clone()).ok_or_else(|| EvalError::CastFailed {
+                        from: format!("{:?}", arg),
+                        to: format!("{:?}", to),
+                    }),
+                    ConcreteDatatype::Uint8(t) => t.try_cast(arg.clone()).ok_or_else(|| EvalError::CastFailed {
+                        from: format!("{:?}", arg),
+                        to: format!("{:?}", to),
+                    }),
+                    ConcreteDatatype::Uint16(t) => t.try_cast(arg.clone()).ok_or_else(|| EvalError::CastFailed {
+                        from: format!("{:?}", arg),
+                        to: format!("{:?}", to),
+                    }),
+                    ConcreteDatatype::Uint32(t) => t.try_cast(arg.clone()).ok_or_else(|| EvalError::CastFailed {
+                        from: format!("{:?}", arg),
+                        to: format!("{:?}", to),
+                    }),
+                    ConcreteDatatype::Uint64(t) => t.try_cast(arg.clone()).ok_or_else(|| EvalError::CastFailed {
+                        from: format!("{:?}", arg),
+                        to: format!("{:?}", to),
+                    }),
+                    ConcreteDatatype::String(t) => t.try_cast(arg.clone()).ok_or_else(|| EvalError::CastFailed {
+                        from: format!("{:?}", arg),
+                        to: format!("{:?}", to),
+                    }),
+                    ConcreteDatatype::Bool(t) => t.try_cast(arg.clone()).ok_or_else(|| EvalError::CastFailed {
+                        from: format!("{:?}", arg),
+                        to: format!("{:?}", to),
+                    }),
+                    _ => {
+                        // For unsupported types like Struct and List, fall back to basic casting
+                        let arg_clone = arg.clone();
+                        match (arg, to) {
+                            (Value::Int64(v), ConcreteDatatype::Int64(_)) => Ok(Value::Int64(v)),
+                            (Value::Float64(v), ConcreteDatatype::Float64(_)) => Ok(Value::Float64(v)),
+                            (Value::String(s), ConcreteDatatype::String(_)) => Ok(Value::String(s)),
+                            (Value::Bool(b), ConcreteDatatype::Bool(_)) => Ok(Value::Bool(b)),
+                            (Value::Int64(v), ConcreteDatatype::Float64(_)) => Ok(Value::Float64(v as f64)),
+                            (Value::Float64(v), ConcreteDatatype::Int64(_)) => Ok(Value::Int64(v as i64)),
+                            (Value::Int64(v), ConcreteDatatype::String(_)) => Ok(Value::String(v.to_string())),
+                            (Value::Float64(v), ConcreteDatatype::String(_)) => Ok(Value::String(v.to_string())),
+                            (Value::Bool(v), ConcreteDatatype::String(_)) => Ok(Value::String(v.to_string())),
+                            (Value::String(s), ConcreteDatatype::Int64(_)) => {
+                                s.parse::<i64>()
+                                    .map(Value::Int64)
+                                    .map_err(|_| EvalError::CastFailed {
+                                        from: format!("{:?}", arg_clone),
+                                        to: format!("{:?}", to),
+                                    })
+                            }
+                            (Value::String(s), ConcreteDatatype::Float64(_)) => {
+                                s.parse::<f64>()
+                                    .map(Value::Float64)
+                                    .map_err(|_| EvalError::CastFailed {
+                                        from: format!("{:?}", arg_clone),
+                                        to: format!("{:?}", to),
+                                    })
+                            }
+                            _ => Err(EvalError::CastFailed {
+                                from: format!("{:?}", arg_clone),
+                                to: format!("{:?}", to),
+                            }),
+                        }
+                    }
                 }
             }
         }
@@ -131,6 +183,15 @@ impl BinaryFunc {
         })
     }
 
+    /// Try to cast a value to Float32
+    fn try_cast_to_float32(value: &Value) -> Option<f32> {
+        let float32_type = Float32Type;
+        float32_type.try_cast(value.clone()).and_then(|v| match v {
+            Value::Float32(f) => Some(f),
+            _ => None,
+        })
+    }
+
     /// Try to cast a value to Float64
     fn try_cast_to_float64(value: &Value) -> Option<f64> {
         let float64_type = Float64Type;
@@ -153,9 +214,16 @@ impl BinaryFunc {
     fn compare_values(left: &Value, right: &Value) -> Option<std::cmp::Ordering> {
         // If types match, compare directly
         match (left, right) {
+            (Value::Int8(a), Value::Int8(b)) => Some(a.cmp(b)),
+            (Value::Int16(a), Value::Int16(b)) => Some(a.cmp(b)),
+            (Value::Int32(a), Value::Int32(b)) => Some(a.cmp(b)),
             (Value::Int64(a), Value::Int64(b)) => Some(a.cmp(b)),
+            (Value::Float32(a), Value::Float32(b)) => a.partial_cmp(b),
             (Value::Float64(a), Value::Float64(b)) => a.partial_cmp(b),
             (Value::Uint8(a), Value::Uint8(b)) => Some(a.cmp(b)),
+            (Value::Uint16(a), Value::Uint16(b)) => Some(a.cmp(b)),
+            (Value::Uint32(a), Value::Uint32(b)) => Some(a.cmp(b)),
+            (Value::Uint64(a), Value::Uint64(b)) => Some(a.cmp(b)),
             (Value::String(a), Value::String(b)) => Some(a.cmp(b)),
             (Value::Bool(a), Value::Bool(b)) => Some(a.cmp(b)),
             // If types don't match, try to cast to a common type
@@ -163,6 +231,11 @@ impl BinaryFunc {
                 // Try Int64 first
                 if let (Some(a), Some(b)) = (Self::try_cast_to_int64(left), Self::try_cast_to_int64(right)) {
                     return Some(a.cmp(&b));
+                }
+                
+                // Try Float32
+                if let (Some(a), Some(b)) = (Self::try_cast_to_float32(left), Self::try_cast_to_float32(right)) {
+                    return a.partial_cmp(&b);
                 }
                 
                 // Try Float64
@@ -185,9 +258,16 @@ impl BinaryFunc {
     fn try_cast_to_numeric(left: Value, right: Value) -> Result<(Value, Value), EvalError> {
         // If types match, return directly
         match (&left, &right) {
+            (Value::Int8(_), Value::Int8(_)) => return Ok((left, right)),
+            (Value::Int16(_), Value::Int16(_)) => return Ok((left, right)),
+            (Value::Int32(_), Value::Int32(_)) => return Ok((left, right)),
             (Value::Int64(_), Value::Int64(_)) => return Ok((left, right)),
+            (Value::Float32(_), Value::Float32(_)) => return Ok((left, right)),
             (Value::Float64(_), Value::Float64(_)) => return Ok((left, right)),
             (Value::Uint8(_), Value::Uint8(_)) => return Ok((left, right)),
+            (Value::Uint16(_), Value::Uint16(_)) => return Ok((left, right)),
+            (Value::Uint32(_), Value::Uint32(_)) => return Ok((left, right)),
+            (Value::Uint64(_), Value::Uint64(_)) => return Ok((left, right)),
             _ => {}
         }
 
@@ -251,9 +331,16 @@ impl BinaryFunc {
             Self::Add => {
                 // If types match, handle directly
                 match (&left, &right) {
+                    (Value::Int8(a), Value::Int8(b)) => return Ok(Value::Int8(a.saturating_add(*b))),
+                    (Value::Int16(a), Value::Int16(b)) => return Ok(Value::Int16(a.saturating_add(*b))),
+                    (Value::Int32(a), Value::Int32(b)) => return Ok(Value::Int32(a.saturating_add(*b))),
                     (Value::Int64(a), Value::Int64(b)) => return Ok(Value::Int64(a + b)),
+                    (Value::Float32(a), Value::Float32(b)) => return Ok(Value::Float32(a + b)),
                     (Value::Float64(a), Value::Float64(b)) => return Ok(Value::Float64(a + b)),
                     (Value::Uint8(a), Value::Uint8(b)) => return Ok(Value::Uint8(a.saturating_add(*b))),
+                    (Value::Uint16(a), Value::Uint16(b)) => return Ok(Value::Uint16(a.saturating_add(*b))),
+                    (Value::Uint32(a), Value::Uint32(b)) => return Ok(Value::Uint32(a.saturating_add(*b))),
+                    (Value::Uint64(a), Value::Uint64(b)) => return Ok(Value::Uint64(a.saturating_add(*b))),
                     (Value::String(left_str), Value::String(right_str)) => {
                         return Ok(Value::String(format!("{}{}", left_str, right_str)));
                     }
@@ -263,9 +350,16 @@ impl BinaryFunc {
                 // If types don't match, try numeric addition first
                 if let Ok((left_num, right_num)) = Self::try_cast_to_numeric(left.clone(), right.clone()) {
                     match (left_num, right_num) {
+                        (Value::Int8(a), Value::Int8(b)) => return Ok(Value::Int8(a.saturating_add(b))),
+                        (Value::Int16(a), Value::Int16(b)) => return Ok(Value::Int16(a.saturating_add(b))),
+                        (Value::Int32(a), Value::Int32(b)) => return Ok(Value::Int32(a.saturating_add(b))),
                         (Value::Int64(a), Value::Int64(b)) => return Ok(Value::Int64(a + b)),
+                        (Value::Float32(a), Value::Float32(b)) => return Ok(Value::Float32(a + b)),
                         (Value::Float64(a), Value::Float64(b)) => return Ok(Value::Float64(a + b)),
                         (Value::Uint8(a), Value::Uint8(b)) => return Ok(Value::Uint8(a.saturating_add(b))),
+                        (Value::Uint16(a), Value::Uint16(b)) => return Ok(Value::Uint16(a.saturating_add(b))),
+                        (Value::Uint32(a), Value::Uint32(b)) => return Ok(Value::Uint32(a.saturating_add(b))),
+                        (Value::Uint64(a), Value::Uint64(b)) => return Ok(Value::Uint64(a.saturating_add(b))),
                         _ => unreachable!(),
                     }
                 }
@@ -273,54 +367,106 @@ impl BinaryFunc {
                 let left_debug = format!("{:?}", &left);
                 let right_debug = format!("{:?}", &right);
                 Err(EvalError::TypeMismatch {
-                    expected: "Int64, Float64, or String".to_string(),
+                    expected: "Int64, Float32, Float64, or String".to_string(),
                     actual: format!("{} and {}", left_debug, right_debug),
                 })
             }
             Self::Sub => {
                 // If types match, handle directly
                 match (&left, &right) {
+                    (Value::Int8(a), Value::Int8(b)) => return Ok(Value::Int8(a.saturating_sub(*b))),
+                    (Value::Int16(a), Value::Int16(b)) => return Ok(Value::Int16(a.saturating_sub(*b))),
+                    (Value::Int32(a), Value::Int32(b)) => return Ok(Value::Int32(a.saturating_sub(*b))),
                     (Value::Int64(a), Value::Int64(b)) => return Ok(Value::Int64(a - b)),
+                    (Value::Float32(a), Value::Float32(b)) => return Ok(Value::Float32(a - b)),
                     (Value::Float64(a), Value::Float64(b)) => return Ok(Value::Float64(a - b)),
                     (Value::Uint8(a), Value::Uint8(b)) => return Ok(Value::Int64(*a as i64 - *b as i64)),
+                    (Value::Uint16(a), Value::Uint16(b)) => return Ok(Value::Int64(*a as i64 - *b as i64)),
+                    (Value::Uint32(a), Value::Uint32(b)) => return Ok(Value::Int64(*a as i64 - *b as i64)),
+                    (Value::Uint64(a), Value::Uint64(b)) => return Ok(Value::Int64(*a as i64 - *b as i64)),
                     _ => {}
                 }
 
                 // If types don't match, try numeric conversion
                 let (left_num, right_num) = Self::try_cast_to_numeric(left, right)?;
                 match (left_num, right_num) {
+                    (Value::Int8(a), Value::Int8(b)) => Ok(Value::Int8(a.saturating_sub(b))),
+                    (Value::Int16(a), Value::Int16(b)) => Ok(Value::Int16(a.saturating_sub(b))),
+                    (Value::Int32(a), Value::Int32(b)) => Ok(Value::Int32(a.saturating_sub(b))),
                     (Value::Int64(a), Value::Int64(b)) => Ok(Value::Int64(a - b)),
+                    (Value::Float32(a), Value::Float32(b)) => Ok(Value::Float32(a - b)),
                     (Value::Float64(a), Value::Float64(b)) => Ok(Value::Float64(a - b)),
                     (Value::Uint8(a), Value::Uint8(b)) => Ok(Value::Int64(a as i64 - b as i64)),
+                    (Value::Uint16(a), Value::Uint16(b)) => Ok(Value::Int64(a as i64 - b as i64)),
+                    (Value::Uint32(a), Value::Uint32(b)) => Ok(Value::Int64(a as i64 - b as i64)),
+                    (Value::Uint64(a), Value::Uint64(b)) => Ok(Value::Int64(a as i64 - b as i64)),
                     _ => unreachable!(),
                 }
             }
             Self::Mul => {
                 // If types match, handle directly
                 match (&left, &right) {
+                    (Value::Int8(a), Value::Int8(b)) => return Ok(Value::Int8(a.saturating_mul(*b))),
+                    (Value::Int16(a), Value::Int16(b)) => return Ok(Value::Int16(a.saturating_mul(*b))),
+                    (Value::Int32(a), Value::Int32(b)) => return Ok(Value::Int32(a.saturating_mul(*b))),
                     (Value::Int64(a), Value::Int64(b)) => return Ok(Value::Int64(a * b)),
+                    (Value::Float32(a), Value::Float32(b)) => return Ok(Value::Float32(a * b)),
                     (Value::Float64(a), Value::Float64(b)) => return Ok(Value::Float64(a * b)),
                     (Value::Uint8(a), Value::Uint8(b)) => return Ok(Value::Uint8(a.saturating_mul(*b))),
+                    (Value::Uint16(a), Value::Uint16(b)) => return Ok(Value::Uint16(a.saturating_mul(*b))),
+                    (Value::Uint32(a), Value::Uint32(b)) => return Ok(Value::Uint32(a.saturating_mul(*b))),
+                    (Value::Uint64(a), Value::Uint64(b)) => return Ok(Value::Uint64(a.saturating_mul(*b))),
                     _ => {}
                 }
 
                 // If types don't match, try numeric conversion
                 let (left_num, right_num) = Self::try_cast_to_numeric(left, right)?;
                 match (left_num, right_num) {
+                    (Value::Int8(a), Value::Int8(b)) => Ok(Value::Int8(a.saturating_mul(b))),
+                    (Value::Int16(a), Value::Int16(b)) => Ok(Value::Int16(a.saturating_mul(b))),
+                    (Value::Int32(a), Value::Int32(b)) => Ok(Value::Int32(a.saturating_mul(b))),
                     (Value::Int64(a), Value::Int64(b)) => Ok(Value::Int64(a * b)),
+                    (Value::Float32(a), Value::Float32(b)) => Ok(Value::Float32(a * b)),
                     (Value::Float64(a), Value::Float64(b)) => Ok(Value::Float64(a * b)),
                     (Value::Uint8(a), Value::Uint8(b)) => Ok(Value::Uint8(a.saturating_mul(b))),
+                    (Value::Uint16(a), Value::Uint16(b)) => Ok(Value::Uint16(a.saturating_mul(b))),
+                    (Value::Uint32(a), Value::Uint32(b)) => Ok(Value::Uint32(a.saturating_mul(b))),
+                    (Value::Uint64(a), Value::Uint64(b)) => Ok(Value::Uint64(a.saturating_mul(b))),
                     _ => unreachable!(),
                 }
             }
             Self::Div => {
                 // If types match, handle directly
                 match (&left, &right) {
+                    (Value::Int8(a), Value::Int8(b)) => {
+                        if *b == 0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Float64(*a as f64 / *b as f64));
+                    }
+                    (Value::Int16(a), Value::Int16(b)) => {
+                        if *b == 0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Float64(*a as f64 / *b as f64));
+                    }
+                    (Value::Int32(a), Value::Int32(b)) => {
+                        if *b == 0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Float64(*a as f64 / *b as f64));
+                    }
                     (Value::Int64(a), Value::Int64(b)) => {
                         if *b == 0 {
                             return Err(EvalError::DivisionByZero);
                         }
                         return Ok(Value::Float64(*a as f64 / *b as f64));
+                    }
+                    (Value::Float32(a), Value::Float32(b)) => {
+                        if *b == 0.0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Float32(a / b));
                     }
                     (Value::Float64(a), Value::Float64(b)) => {
                         if *b == 0.0 {
@@ -329,6 +475,24 @@ impl BinaryFunc {
                         return Ok(Value::Float64(a / b));
                     }
                     (Value::Uint8(a), Value::Uint8(b)) => {
+                        if *b == 0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Float64(*a as f64 / *b as f64));
+                    }
+                    (Value::Uint16(a), Value::Uint16(b)) => {
+                        if *b == 0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Float64(*a as f64 / *b as f64));
+                    }
+                    (Value::Uint32(a), Value::Uint32(b)) => {
+                        if *b == 0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Float64(*a as f64 / *b as f64));
+                    }
+                    (Value::Uint64(a), Value::Uint64(b)) => {
                         if *b == 0 {
                             return Err(EvalError::DivisionByZero);
                         }
@@ -358,11 +522,35 @@ impl BinaryFunc {
             Self::Mod => {
                 // If types match, handle directly
                 match (&left, &right) {
+                    (Value::Int8(a), Value::Int8(b)) => {
+                        if *b == 0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Int8(a % b));
+                    }
+                    (Value::Int16(a), Value::Int16(b)) => {
+                        if *b == 0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Int16(a % b));
+                    }
+                    (Value::Int32(a), Value::Int32(b)) => {
+                        if *b == 0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Int32(a % b));
+                    }
                     (Value::Int64(a), Value::Int64(b)) => {
                         if *b == 0 {
                             return Err(EvalError::DivisionByZero);
                         }
                         return Ok(Value::Int64(a % b));
+                    }
+                    (Value::Float32(a), Value::Float32(b)) => {
+                        if *b == 0.0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Float32(a % b));
                     }
                     (Value::Float64(a), Value::Float64(b)) => {
                         if *b == 0.0 {
@@ -376,17 +564,63 @@ impl BinaryFunc {
                         }
                         return Ok(Value::Uint8(a % b));
                     }
+                    (Value::Uint16(a), Value::Uint16(b)) => {
+                        if *b == 0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Uint16(a % b));
+                    }
+                    (Value::Uint32(a), Value::Uint32(b)) => {
+                        if *b == 0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Uint32(a % b));
+                    }
+                    (Value::Uint64(a), Value::Uint64(b)) => {
+                        if *b == 0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        return Ok(Value::Uint64(a % b));
+                    }
                     _ => {}
                 }
 
                 // If types don't match, try numeric conversion
                 let (left_num, right_num) = Self::try_cast_to_numeric(left, right)?;
                 match (left_num, right_num) {
+                    (Value::Int8(a), Value::Int8(b)) => {
+                        if b == 0 {
+                            Err(EvalError::DivisionByZero)
+                        } else {
+                            Ok(Value::Int8(a % b))
+                        }
+                    }
+                    (Value::Int16(a), Value::Int16(b)) => {
+                        if b == 0 {
+                            Err(EvalError::DivisionByZero)
+                        } else {
+                            Ok(Value::Int16(a % b))
+                        }
+                    }
+                    (Value::Int32(a), Value::Int32(b)) => {
+                        if b == 0 {
+                            Err(EvalError::DivisionByZero)
+                        } else {
+                            Ok(Value::Int32(a % b))
+                        }
+                    }
                     (Value::Int64(a), Value::Int64(b)) => {
                         if b == 0 {
                             Err(EvalError::DivisionByZero)
                         } else {
                             Ok(Value::Int64(a % b))
+                        }
+                    }
+                    (Value::Float32(a), Value::Float32(b)) => {
+                        if b == 0.0 {
+                            Err(EvalError::DivisionByZero)
+                        } else {
+                            Ok(Value::Float32(a % b))
                         }
                     }
                     (Value::Float64(a), Value::Float64(b)) => {
@@ -401,6 +635,27 @@ impl BinaryFunc {
                             Err(EvalError::DivisionByZero)
                         } else {
                             Ok(Value::Uint8(a % b))
+                        }
+                    }
+                    (Value::Uint16(a), Value::Uint16(b)) => {
+                        if b == 0 {
+                            Err(EvalError::DivisionByZero)
+                        } else {
+                            Ok(Value::Uint16(a % b))
+                        }
+                    }
+                    (Value::Uint32(a), Value::Uint32(b)) => {
+                        if b == 0 {
+                            Err(EvalError::DivisionByZero)
+                        } else {
+                            Ok(Value::Uint32(a % b))
+                        }
+                    }
+                    (Value::Uint64(a), Value::Uint64(b)) => {
+                        if b == 0 {
+                            Err(EvalError::DivisionByZero)
+                        } else {
+                            Ok(Value::Uint64(a % b))
                         }
                     }
                     _ => unreachable!(),

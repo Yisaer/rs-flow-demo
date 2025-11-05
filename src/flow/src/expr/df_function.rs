@@ -82,9 +82,16 @@ fn create_simple_schema(values: &[Value]) -> FlowSchema {
 #[allow(dead_code)]
 fn value_to_concrete_datatype(value: &Value) -> ConcreteDatatype {
     match value {
+        Value::Int8(_) => ConcreteDatatype::Int8(datatypes::Int8Type),
+        Value::Int16(_) => ConcreteDatatype::Int16(datatypes::Int16Type),
+        Value::Int32(_) => ConcreteDatatype::Int32(datatypes::Int32Type),
         Value::Int64(_) => ConcreteDatatype::Int64(datatypes::Int64Type),
+        Value::Float32(_) => ConcreteDatatype::Float32(datatypes::Float32Type),
         Value::Float64(_) => ConcreteDatatype::Float64(datatypes::Float64Type),
         Value::Uint8(_) => ConcreteDatatype::Uint8(datatypes::Uint8Type),
+        Value::Uint16(_) => ConcreteDatatype::Uint16(datatypes::Uint16Type),
+        Value::Uint32(_) => ConcreteDatatype::Uint32(datatypes::Uint32Type),
+        Value::Uint64(_) => ConcreteDatatype::Uint64(datatypes::Uint64Type),
         Value::String(_) => ConcreteDatatype::String(datatypes::StringType),
         Value::Bool(_) => ConcreteDatatype::Bool(datatypes::BooleanType),
         Value::Struct(_) => panic!("Struct type not supported in simple schema"),

@@ -123,6 +123,33 @@ fn json_value_to_value(json_val: &JsonValue, data_type: &ConcreteDatatype) -> Re
     match (json_val, data_type) {
         (JsonValue::Null, _) => Ok(get_default_value(data_type)),
         (JsonValue::Bool(b), ConcreteDatatype::Bool(_)) => Ok(Value::Bool(*b)),
+        (JsonValue::Number(n), ConcreteDatatype::Int8(_)) => {
+            n.as_i64()
+                .and_then(|i| if i >= i8::MIN as i64 && i <= i8::MAX as i64 { Some(i as i8) } else { None })
+                .ok_or_else(|| JsonError::TypeMismatch {
+                    expected: "Int8".to_string(),
+                    actual: format!("{}", n),
+                })
+                .map(Value::Int8)
+        }
+        (JsonValue::Number(n), ConcreteDatatype::Int16(_)) => {
+            n.as_i64()
+                .and_then(|i| if i >= i16::MIN as i64 && i <= i16::MAX as i64 { Some(i as i16) } else { None })
+                .ok_or_else(|| JsonError::TypeMismatch {
+                    expected: "Int16".to_string(),
+                    actual: format!("{}", n),
+                })
+                .map(Value::Int16)
+        }
+        (JsonValue::Number(n), ConcreteDatatype::Int32(_)) => {
+            n.as_i64()
+                .and_then(|i| if i >= i32::MIN as i64 && i <= i32::MAX as i64 { Some(i as i32) } else { None })
+                .ok_or_else(|| JsonError::TypeMismatch {
+                    expected: "Int32".to_string(),
+                    actual: format!("{}", n),
+                })
+                .map(Value::Int32)
+        }
         (JsonValue::Number(n), ConcreteDatatype::Int64(_)) => {
             n.as_i64()
                 .ok_or_else(|| JsonError::TypeMismatch {
@@ -130,6 +157,15 @@ fn json_value_to_value(json_val: &JsonValue, data_type: &ConcreteDatatype) -> Re
                     actual: format!("{}", n),
                 })
                 .map(Value::Int64)
+        }
+        (JsonValue::Number(n), ConcreteDatatype::Float32(_)) => {
+            n.as_f64()
+                .and_then(|f| if f >= f32::MIN as f64 && f <= f32::MAX as f64 { Some(f as f32) } else { None })
+                .ok_or_else(|| JsonError::TypeMismatch {
+                    expected: "Float32".to_string(),
+                    actual: format!("{}", n),
+                })
+                .map(Value::Float32)
         }
         (JsonValue::Number(n), ConcreteDatatype::Float64(_)) => {
             n.as_f64()
@@ -148,11 +184,69 @@ fn json_value_to_value(json_val: &JsonValue, data_type: &ConcreteDatatype) -> Re
                 })
                 .map(Value::Uint8)
         }
+        (JsonValue::Number(n), ConcreteDatatype::Uint16(_)) => {
+            n.as_u64()
+                .and_then(|u| if u <= u16::MAX as u64 { Some(u as u16) } else { None })
+                .ok_or_else(|| JsonError::TypeMismatch {
+                    expected: "Uint16".to_string(),
+                    actual: format!("{}", n),
+                })
+                .map(Value::Uint16)
+        }
+        (JsonValue::Number(n), ConcreteDatatype::Uint32(_)) => {
+            n.as_u64()
+                .and_then(|u| if u <= u32::MAX as u64 { Some(u as u32) } else { None })
+                .ok_or_else(|| JsonError::TypeMismatch {
+                    expected: "Uint32".to_string(),
+                    actual: format!("{}", n),
+                })
+                .map(Value::Uint32)
+        }
+        (JsonValue::Number(n), ConcreteDatatype::Uint64(_)) => {
+            n.as_u64()
+                .ok_or_else(|| JsonError::TypeMismatch {
+                    expected: "Uint64".to_string(),
+                    actual: format!("{}", n),
+                })
+                .map(Value::Uint64)
+        }
         (JsonValue::String(s), ConcreteDatatype::String(_)) => Ok(Value::String(s.clone())),
         (JsonValue::Number(n), dt) => {
             // Try to convert number to the expected type
             if let Some(i) = n.as_i64() {
                 match dt {
+                    ConcreteDatatype::Int8(_) => {
+                        if i >= i8::MIN as i64 && i <= i8::MAX as i64 {
+                            Ok(Value::Int8(i as i8))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Int8".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Int16(_) => {
+                        if i >= i16::MIN as i64 && i <= i16::MAX as i64 {
+                            Ok(Value::Int16(i as i16))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Int16".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Int32(_) => {
+                        if i >= i32::MIN as i64 && i <= i32::MAX as i64 {
+                            Ok(Value::Int32(i as i32))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Int32".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Int64(_) => Ok(Value::Int64(i)),
+                    ConcreteDatatype::Float32(_) => Ok(Value::Float32(i as f32)),
                     ConcreteDatatype::Float64(_) => Ok(Value::Float64(i as f64)),
                     ConcreteDatatype::Uint8(_) => {
                         if i >= 0 && i <= u8::MAX as i64 {
@@ -160,6 +254,36 @@ fn json_value_to_value(json_val: &JsonValue, data_type: &ConcreteDatatype) -> Re
                         } else {
                             Err(JsonError::TypeMismatch {
                                 expected: "Uint8".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Uint16(_) => {
+                        if i >= 0 && i <= u16::MAX as i64 {
+                            Ok(Value::Uint16(i as u16))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Uint16".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Uint32(_) => {
+                        if i >= 0 && i <= u32::MAX as i64 {
+                            Ok(Value::Uint32(i as u32))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Uint32".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Uint64(_) => {
+                        if i >= 0 {
+                            Ok(Value::Uint64(i as u64))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Uint64".to_string(),
                                 actual: format!("{}", n),
                             })
                         }
@@ -172,13 +296,84 @@ fn json_value_to_value(json_val: &JsonValue, data_type: &ConcreteDatatype) -> Re
                 }
             } else if let Some(f) = n.as_f64() {
                 match dt {
+                    ConcreteDatatype::Int8(_) => {
+                        if f >= i8::MIN as f64 && f <= i8::MAX as f64 && f.fract() == 0.0 {
+                            Ok(Value::Int8(f as i8))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Int8".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Int16(_) => {
+                        if f >= i16::MIN as f64 && f <= i16::MAX as f64 && f.fract() == 0.0 {
+                            Ok(Value::Int16(f as i16))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Int16".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Int32(_) => {
+                        if f >= i32::MIN as f64 && f <= i32::MAX as f64 && f.fract() == 0.0 {
+                            Ok(Value::Int32(f as i32))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Int32".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
                     ConcreteDatatype::Int64(_) => Ok(Value::Int64(f as i64)),
+                    ConcreteDatatype::Float32(_) => {
+                        if f >= f32::MIN as f64 && f <= f32::MAX as f64 {
+                            Ok(Value::Float32(f as f32))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Float32".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Float64(_) => Ok(Value::Float64(f)),
                     ConcreteDatatype::Uint8(_) => {
                         if f >= 0.0 && f <= u8::MAX as f64 && f.fract() == 0.0 {
                             Ok(Value::Uint8(f as u8))
                         } else {
                             Err(JsonError::TypeMismatch {
                                 expected: "Uint8".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Uint16(_) => {
+                        if f >= 0.0 && f <= u16::MAX as f64 && f.fract() == 0.0 {
+                            Ok(Value::Uint16(f as u16))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Uint16".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Uint32(_) => {
+                        if f >= 0.0 && f <= u32::MAX as f64 && f.fract() == 0.0 {
+                            Ok(Value::Uint32(f as u32))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Uint32".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Uint64(_) => {
+                        if f >= 0.0 && f <= u64::MAX as f64 && f.fract() == 0.0 {
+                            Ok(Value::Uint64(f as u64))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Uint64".to_string(),
                                 actual: format!("{}", n),
                             })
                         }
@@ -191,7 +386,38 @@ fn json_value_to_value(json_val: &JsonValue, data_type: &ConcreteDatatype) -> Re
                 }
             } else if let Some(u) = n.as_u64() {
                 match dt {
+                    ConcreteDatatype::Int8(_) => {
+                        if u <= i8::MAX as u64 {
+                            Ok(Value::Int8(u as i8))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Int8".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Int16(_) => {
+                        if u <= i16::MAX as u64 {
+                            Ok(Value::Int16(u as i16))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Int16".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Int32(_) => {
+                        if u <= i32::MAX as u64 {
+                            Ok(Value::Int32(u as i32))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Int32".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
                     ConcreteDatatype::Int64(_) => Ok(Value::Int64(u as i64)),
+                    ConcreteDatatype::Float32(_) => Ok(Value::Float32(u as f32)),
                     ConcreteDatatype::Float64(_) => Ok(Value::Float64(u as f64)),
                     ConcreteDatatype::Uint8(_) => {
                         if u <= u8::MAX as u64 {
@@ -203,6 +429,27 @@ fn json_value_to_value(json_val: &JsonValue, data_type: &ConcreteDatatype) -> Re
                             })
                         }
                     }
+                    ConcreteDatatype::Uint16(_) => {
+                        if u <= u16::MAX as u64 {
+                            Ok(Value::Uint16(u as u16))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Uint16".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Uint32(_) => {
+                        if u <= u32::MAX as u64 {
+                            Ok(Value::Uint32(u as u32))
+                        } else {
+                            Err(JsonError::TypeMismatch {
+                                expected: "Uint32".to_string(),
+                                actual: format!("{}", n),
+                            })
+                        }
+                    }
+                    ConcreteDatatype::Uint64(_) => Ok(Value::Uint64(u)),
                     ConcreteDatatype::String(_) => Ok(Value::String(u.to_string())),
                     _ => Err(JsonError::TypeMismatch {
                         expected: format!("{:?}", dt),
@@ -218,9 +465,16 @@ fn json_value_to_value(json_val: &JsonValue, data_type: &ConcreteDatatype) -> Re
         }
         (JsonValue::Bool(b), dt) => {
             match dt {
+                ConcreteDatatype::Int8(_) => Ok(Value::Int8(if *b { 1 } else { 0 })),
+                ConcreteDatatype::Int16(_) => Ok(Value::Int16(if *b { 1 } else { 0 })),
+                ConcreteDatatype::Int32(_) => Ok(Value::Int32(if *b { 1 } else { 0 })),
                 ConcreteDatatype::Int64(_) => Ok(Value::Int64(if *b { 1 } else { 0 })),
+                ConcreteDatatype::Float32(_) => Ok(Value::Float32(if *b { 1.0 } else { 0.0 })),
                 ConcreteDatatype::Float64(_) => Ok(Value::Float64(if *b { 1.0 } else { 0.0 })),
                 ConcreteDatatype::Uint8(_) => Ok(Value::Uint8(if *b { 1 } else { 0 })),
+                ConcreteDatatype::Uint16(_) => Ok(Value::Uint16(if *b { 1 } else { 0 })),
+                ConcreteDatatype::Uint32(_) => Ok(Value::Uint32(if *b { 1 } else { 0 })),
+                ConcreteDatatype::Uint64(_) => Ok(Value::Uint64(if *b { 1 } else { 0 })),
                 ConcreteDatatype::String(_) => Ok(Value::String(b.to_string())),
                 _ => Err(JsonError::TypeMismatch {
                     expected: format!("{:?}", dt),
@@ -230,11 +484,43 @@ fn json_value_to_value(json_val: &JsonValue, data_type: &ConcreteDatatype) -> Re
         }
         (JsonValue::String(s), dt) => {
             match dt {
+                ConcreteDatatype::Int8(_) => {
+                    s.parse::<i8>()
+                        .map(Value::Int8)
+                        .map_err(|_| JsonError::TypeMismatch {
+                            expected: "Int8".to_string(),
+                            actual: s.clone(),
+                        })
+                }
+                ConcreteDatatype::Int16(_) => {
+                    s.parse::<i16>()
+                        .map(Value::Int16)
+                        .map_err(|_| JsonError::TypeMismatch {
+                            expected: "Int16".to_string(),
+                            actual: s.clone(),
+                        })
+                }
+                ConcreteDatatype::Int32(_) => {
+                    s.parse::<i32>()
+                        .map(Value::Int32)
+                        .map_err(|_| JsonError::TypeMismatch {
+                            expected: "Int32".to_string(),
+                            actual: s.clone(),
+                        })
+                }
                 ConcreteDatatype::Int64(_) => {
                     s.parse::<i64>()
                         .map(Value::Int64)
                         .map_err(|_| JsonError::TypeMismatch {
                             expected: "Int64".to_string(),
+                            actual: s.clone(),
+                        })
+                }
+                ConcreteDatatype::Float32(_) => {
+                    s.parse::<f32>()
+                        .map(Value::Float32)
+                        .map_err(|_| JsonError::TypeMismatch {
+                            expected: "Float32".to_string(),
                             actual: s.clone(),
                         })
                 }
@@ -251,6 +537,30 @@ fn json_value_to_value(json_val: &JsonValue, data_type: &ConcreteDatatype) -> Re
                         .map(Value::Uint8)
                         .map_err(|_| JsonError::TypeMismatch {
                             expected: "Uint8".to_string(),
+                            actual: s.clone(),
+                        })
+                }
+                ConcreteDatatype::Uint16(_) => {
+                    s.parse::<u16>()
+                        .map(Value::Uint16)
+                        .map_err(|_| JsonError::TypeMismatch {
+                            expected: "Uint16".to_string(),
+                            actual: s.clone(),
+                        })
+                }
+                ConcreteDatatype::Uint32(_) => {
+                    s.parse::<u32>()
+                        .map(Value::Uint32)
+                        .map_err(|_| JsonError::TypeMismatch {
+                            expected: "Uint32".to_string(),
+                            actual: s.clone(),
+                        })
+                }
+                ConcreteDatatype::Uint64(_) => {
+                    s.parse::<u64>()
+                        .map(Value::Uint64)
+                        .map_err(|_| JsonError::TypeMismatch {
+                            expected: "Uint64".to_string(),
                             actual: s.clone(),
                         })
                 }
@@ -280,9 +590,16 @@ fn json_value_to_value(json_val: &JsonValue, data_type: &ConcreteDatatype) -> Re
 /// Get default value for a ConcreteDatatype
 fn get_default_value(data_type: &ConcreteDatatype) -> Value {
     match data_type {
+        ConcreteDatatype::Int8(t) => t.default_value(),
+        ConcreteDatatype::Int16(t) => t.default_value(),
+        ConcreteDatatype::Int32(t) => t.default_value(),
         ConcreteDatatype::Int64(t) => t.default_value(),
+        ConcreteDatatype::Float32(t) => t.default_value(),
         ConcreteDatatype::Float64(t) => t.default_value(),
         ConcreteDatatype::Uint8(t) => t.default_value(),
+        ConcreteDatatype::Uint16(t) => t.default_value(),
+        ConcreteDatatype::Uint32(t) => t.default_value(),
+        ConcreteDatatype::Uint64(t) => t.default_value(),
         ConcreteDatatype::String(t) => t.default_value(),
         ConcreteDatatype::Bool(t) => t.default_value(),
         ConcreteDatatype::Struct(t) => t.default_value(),
