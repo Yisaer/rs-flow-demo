@@ -86,7 +86,6 @@ fn convert_unary_op(op: &UnaryOperator) -> Result<UnaryFunc, ConversionError> {
 impl std::error::Error for ConversionError {}
 
 /// Convert sqlparser Expression to flow ScalarExpr with schema support
-/// 直接要求 schema 参数，确保列引用能够正确映射
 pub fn convert_expr_to_scalar(
     expr: &Expr,
     schema: &Schema,
@@ -420,4 +419,84 @@ pub fn extract_select_expressions(
             "Expected SELECT statement".to_string()
         )),
     }
+}
+/// Convert SelectStmt to ScalarExpr with aliases
+pub fn convert_select_stmt_to_scalar(
+    select_stmt: &parser::SelectStmt, 
+    schema: &Schema
+) -> Result<Vec<(ScalarExpr, Option<String>)>, ConversionError> {
+    let mut results = Vec::new();
+    
+    for field in &select_stmt.select_fields {
+        let scalar_expr = convert_expr_to_scalar(&field.expr, schema)?;
+        results.push((scalar_expr, field.alias.clone()));
+    }
+    
+    Ok(results)
+}
+
+/// High-level API: StreamDialect SQL to ScalarExpr conversion
+pub struct StreamSqlConverter {
+}
+
+impl StreamSqlConverter {
+    /// Create a new StreamSqlConverter
+    pub fn new() -> Self {
+        Self {}
+    }
+    
+    /// Parse SQL using StreamDialect and convert to ScalarExpr with aliases
+    pub fn parse_and_convert(
+        &self, 
+        sql: &str, 
+        schema: &Schema
+    ) -> Result<Vec<(ScalarExpr, Option<String>)>, ConversionError> {
+        // 使用 StreamDialect 解析 SQL
+        let select_stmt = parser::parse_sql(sql)
+            .map_err(|e| ConversionError::UnsupportedExpression(format!("Parse error: {}", e)))?;
+        
+        // 转换为 ScalarExpr
+        convert_select_stmt_to_scalar(&select_stmt, schema)
+    }
+    
+    /// Parse SQL using StreamDialect and convert to ScalarExpr (without aliases)
+    pub fn parse_sql_to_scalar(
+        &self,
+        sql: &str, 
+        schema: &Schema
+    ) -> Result<Vec<ScalarExpr>, ConversionError> {
+        let results = self.parse_and_convert(sql, schema)?;
+        Ok(results.into_iter().map(|(expr, _)| expr).collect())
+    }
+}
+
+impl Default for StreamSqlConverter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Convenience function: SQL string to ScalarExpr (uses StreamDialect)
+
+/// Convenience function: SQL string to ScalarExpr with aliases (uses StreamDialect)
+pub fn extract_select_expressions_with_aliases(sql: &str, schema: &Schema) -> Result<Vec<(ScalarExpr, Option<String>)>, ConversionError> {
+    let converter = StreamSqlConverter::new();
+    converter.parse_and_convert(sql, schema)
+}
+
+/// Backward compatibility: convert single expression
+pub fn convert_expr_to_scalar_with_schema(
+    expr: &Expr,
+    schema: &Schema,
+) -> Result<ScalarExpr, ConversionError> {
+    convert_expr_to_scalar(expr, schema)
+}
+
+/// Convenience function for external use
+pub fn parse_sql_to_scalar_expr(
+    sql: &str,
+    schema: &Schema
+) -> Result<Vec<ScalarExpr>, ConversionError> {
+    let converter = StreamSqlConverter::new();
+    converter.parse_sql_to_scalar(sql, schema)
 }
