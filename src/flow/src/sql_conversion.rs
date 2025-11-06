@@ -445,27 +445,25 @@ impl StreamSqlConverter {
         Self {}
     }
     
-    /// Parse SQL using StreamDialect and convert to ScalarExpr with aliases
-    pub fn parse_and_convert(
+    /// 将 SelectStmt 转换为 ScalarExpr（带别名）
+    /// 核心功能：接收 parser 的 SelectStmt，返回 (ScalarExpr, 别名) 列表
+    pub fn convert_select_stmt(
         &self, 
-        sql: &str, 
+        select_stmt: &parser::SelectStmt, 
         schema: &Schema
     ) -> Result<Vec<(ScalarExpr, Option<String>)>, ConversionError> {
-        // 使用 StreamDialect 解析 SQL
-        let select_stmt = parser::parse_sql(sql)
-            .map_err(|e| ConversionError::UnsupportedExpression(format!("Parse error: {}", e)))?;
-        
-        // 转换为 ScalarExpr
-        convert_select_stmt_to_scalar(&select_stmt, schema)
+        // 核心转换：SelectStmt → ScalarExpr
+        convert_select_stmt_to_scalar(select_stmt, schema)
     }
     
-    /// Parse SQL using StreamDialect and convert to ScalarExpr (without aliases)
-    pub fn parse_sql_to_scalar(
+    /// 将 SelectStmt 转换为 ScalarExpr（不带别名）
+    /// 核心功能：接收 parser 的 SelectStmt，返回 ScalarExpr 列表
+    pub fn convert_select_stmt_to_scalar(
         &self,
-        sql: &str, 
+        select_stmt: &parser::SelectStmt, 
         schema: &Schema
     ) -> Result<Vec<ScalarExpr>, ConversionError> {
-        let results = self.parse_and_convert(sql, schema)?;
+        let results = self.convert_select_stmt(select_stmt, schema)?;
         Ok(results.into_iter().map(|(expr, _)| expr).collect())
     }
 }
@@ -476,12 +474,16 @@ impl Default for StreamSqlConverter {
     }
 }
 
-/// Convenience function: SQL string to ScalarExpr (uses StreamDialect)
-
-/// Convenience function: SQL string to ScalarExpr with aliases (uses StreamDialect)
+/// 便捷函数：SQL字符串 → SelectStmt → ScalarExpr（带别名）
+/// 完整流程：先解析SQL得到SelectStmt，然后转换为ScalarExpr
 pub fn extract_select_expressions_with_aliases(sql: &str, schema: &Schema) -> Result<Vec<(ScalarExpr, Option<String>)>, ConversionError> {
+    // 步骤1: 使用StreamDialect解析SQL得到SelectStmt
+    let select_stmt = parser::parse_sql(sql)
+        .map_err(|e| ConversionError::UnsupportedExpression(format!("Parse error: {}", e)))?;
+    
+    // 步骤2: 使用StreamSqlConverter转换SelectStmt为ScalarExpr
     let converter = StreamSqlConverter::new();
-    converter.parse_and_convert(sql, schema)
+    converter.convert_select_stmt(&select_stmt, schema)
 }
 
 /// Backward compatibility: convert single expression
@@ -492,11 +494,16 @@ pub fn convert_expr_to_scalar_with_schema(
     convert_expr_to_scalar(expr, schema)
 }
 
-/// Convenience function for external use
+ 
 pub fn parse_sql_to_scalar_expr(
     sql: &str,
     schema: &Schema
 ) -> Result<Vec<ScalarExpr>, ConversionError> {
+    // 步骤1: 使用StreamDialect解析SQL得到SelectStmt
+    let select_stmt = parser::parse_sql(sql)
+        .map_err(|e| ConversionError::UnsupportedExpression(format!("Parse error: {}", e)))?;
+    
+    // 步骤2: 使用StreamSqlConverter转换SelectStmt为ScalarExpr
     let converter = StreamSqlConverter::new();
-    converter.parse_sql_to_scalar(sql, schema)
+    converter.convert_select_stmt_to_scalar(&select_stmt, schema)
 }
