@@ -1,4 +1,4 @@
-use sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, GroupByExpr, SetExpr, Statement, Value};
+use sqlparser::ast::{Expr, GroupByExpr, SetExpr, Statement};
 use sqlparser::parser::ParserError;
 
 use super::window;
@@ -104,34 +104,7 @@ fn parse_tumblingwindow_expr(expr: &Expr) -> Result<Option<Expr>, ParserError> {
     }
 }
 
-/// Parse tumblingwindow function arguments
-fn parse_tumblingwindow_args(args: &[FunctionArg]) -> Result<(String, String), ParserError> {
-    if args.len() != 2 {
-        return Err(ParserError::ParserError(
-            "tumblingwindow function requires exactly 2 arguments: time_unit and size".to_string()
-        ));
-    }
-    
-    let time_unit = match &args[0] {
-        FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Value(Value::SingleQuotedString(s)))) => s.clone(),
-        _ => {
-            return Err(ParserError::ParserError(
-                "tumblingwindow first argument must be a string literal (time unit)".to_string()
-            ));
-        }
-    };
-    
-    let size = match &args[1] {
-        FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Value(Value::Number(n, _)))) => n.clone(),
-        _ => {
-            return Err(ParserError::ParserError(
-                "tumblingwindow second argument must be a number (window size)".to_string()
-            ));
-        }
-    };
-    
-    Ok((time_unit, size))
-}
+
 
 #[cfg(test)]
 mod tests {

@@ -122,7 +122,7 @@ impl<'a> ExpressionAnalyzer<'a> {
     }
 }
 
-impl<'a> Visitor for ExpressionAnalyzer<'a> {
+impl Visitor for ExpressionAnalyzer<'_> {
     type Break = ();
 
     fn pre_visit_expr(&mut self, expr: &Expr) -> std::ops::ControlFlow<Self::Break> {
