@@ -3,6 +3,7 @@ use sqlparser::parser::Parser;
 
 use crate::dialect::StreamDialect;
 use crate::select_stmt::{SelectStmt, SelectField};
+use crate::aggregate_transformer::transform_aggregate_functions;
 
 /// SQL Parser based on StreamDialect
 pub struct StreamSqlParser {
@@ -17,8 +18,9 @@ impl StreamSqlParser {
         }
     }
 
-    /// Parse SQL string and return SelectStmt containing select fields
+    /// Parse SQL string and return SelectStmt containing select fields and aggregate mappings
     /// This is the main entry point for parsing SQL with StreamDialect
+    /// Automatically transforms aggregate functions during parsing
     pub fn parse(&self, sql: &str) -> Result<SelectStmt, String> {
         // Create a parser with StreamDialect
         let mut parser = Parser::parse_sql(&self.dialect, sql)
@@ -35,8 +37,13 @@ impl StreamSqlParser {
             return Err(format!("Dialect processing error: {}", e));
         }
 
-        // Extract select fields from the statement
-        self.extract_select_fields(statement)
+        // Extract raw select fields from the statement (before transformation)
+        let select_stmt = self.extract_select_fields(statement)?;
+        
+        // Transform aggregate functions in one step (search + replace)
+        let (transformed_stmt, _aggregate_mappings) = transform_aggregate_functions(select_stmt)?;
+        
+        Ok(transformed_stmt)
     }
 
     /// Extract select fields from a parsed SQL statement
@@ -79,7 +86,10 @@ impl StreamSqlParser {
             }
         }
 
-        Ok(SelectStmt::with_fields(select_fields))
+        // Extract HAVING clause if present
+        let having = select.having.clone();
+
+        Ok(SelectStmt::with_fields_and_having(select_fields, having))
     }
 }
 
