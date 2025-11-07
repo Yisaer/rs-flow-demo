@@ -183,10 +183,11 @@ fn is_aggregate_function(function_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlparser::ast::Ident;
+    use sqlparser::ast::{Function, Ident};
     use sqlparser::ast::ObjectName;
     use sqlparser::ast::FunctionArg;
     use sqlparser::ast::FunctionArgExpr;
+    use crate::SelectField;
 
     #[test]
     fn test_simple_aggregate_transformation() {

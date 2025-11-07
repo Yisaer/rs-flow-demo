@@ -106,7 +106,7 @@ pub fn contains_aggregates_with_visitor(expr: &Expr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlparser::ast::Ident;
+    use sqlparser::ast::{Function, Ident};
     use sqlparser::ast::ObjectName;
     use sqlparser::ast::FunctionArg;
     use sqlparser::ast::FunctionArgExpr;

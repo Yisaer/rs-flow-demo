@@ -20,6 +20,7 @@ test:
 	@echo "Running tests for sub-crates..."
 	@cd src/datatypes && cargo test
 	@cd src/flow && cargo test
+	@cd src/parser && cargo test
 
 # 格式化代码
 fmt:
