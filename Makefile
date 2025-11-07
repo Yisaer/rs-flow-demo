@@ -20,6 +20,7 @@ test:
 	@echo "Running tests for sub-crates..."
 	@cd src/datatypes && cargo test
 	@cd src/flow && cargo test
+	@cd src/parser && cargo test
 
 # 格式化代码
 fmt:
@@ -33,6 +34,7 @@ clippy:
 	@echo "Running Clippy checks for sub-crates..."
 	@cd src/datatypes && cargo clippy -- -D warnings
 	@cd src/flow && cargo clippy -- -D warnings
+	@cd src/parser && cargo clippy -- -D warnings
 
 # 清理构建文件
 clean:
