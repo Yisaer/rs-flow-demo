@@ -7,7 +7,7 @@ members = [
 resolver = "2"
 
 [package]
-name = "rs-flow-demo"
+name = "synapseFlow"
 version = "0.1.0"
 edition = "2021"
 
@@ -18,5 +18,5 @@ datatypes = { path = "src/datatypes" }
 sqlparser = { version = "0.40", features = ["serde", "visitor"] }
 
 [[bin]]
-name = "rs-flow-demo"
+name = "synapseFlow"
 path = "src/main.rs"

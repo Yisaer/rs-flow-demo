@@ -2319,16 +2319,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rs-flow-demo"
-version = "0.1.0"
-dependencies = [
- "datatypes",
- "flow",
- "parser",
- "sqlparser 0.40.0",
-]
-
-[[package]]
 name = "rustc_version"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2582,6 +2572,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "synapseFlow"
+version = "0.1.0"
+dependencies = [
+ "datatypes",
+ "flow",
+ "parser",
+ "sqlparser 0.40.0",
 ]
 
 [[package]]
