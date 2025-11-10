@@ -1,8 +1,8 @@
 use datatypes::{ConcreteDatatype, Value};
 
 use crate::expr::func::{BinaryFunc, EvalError, UnaryFunc};
-use crate::expr::evaluator::DataFusionEvaluator;
-use crate::tuple::Tuple;
+use crate::expr::datafusion_func::DataFusionEvaluator;
+use crate::model::row::Row;
 use std::sync::Arc;
 
 /// Custom function that can be implemented by users
@@ -39,8 +39,11 @@ pub trait CustomFunc: Send + Sync + std::fmt::Debug {
 /// A scalar expression, which can be evaluated to a value.
 #[derive(Clone)]
 pub enum ScalarExpr {
-    /// A column reference by index
-    Column(usize),
+    /// A column reference by source name and column name
+    Column {
+        source_name: String,
+        column_name: String,
+    },
     /// A literal value with its type
     Literal(Value, ConcreteDatatype),
     /// A unary function call
@@ -97,34 +100,33 @@ impl ScalarExpr {
     /// # Returns
     ///
     /// Returns the evaluated value, or an error if evaluation fails.
-    pub fn eval(&self, evaluator: &DataFusionEvaluator, tuple: &Tuple) -> Result<Value, EvalError> {
+    pub fn eval(&self, evaluator: &DataFusionEvaluator, row: &dyn Row) -> Result<Value, EvalError> {
         match self {
-            ScalarExpr::Column(index) => {
-                tuple.row()
-                    .get(*index)
+            ScalarExpr::Column { source_name, column_name } => {
+                row.get_by_source_column(source_name, column_name)
                     .cloned()
-                    .ok_or(EvalError::IndexOutOfBounds {
-                        index: *index,
-                        length: tuple.row().len(),
+                    .ok_or_else(|| EvalError::ColumnNotFound {
+                        source: source_name.clone(),
+                        column: column_name.clone(),
                     })
             }
             ScalarExpr::Literal(val, _) => Ok(val.clone()),
             ScalarExpr::CallUnary { func, expr } => {
                 // Recursively evaluate the argument expression
-                let arg = expr.eval(evaluator, tuple)?;
+                let arg = expr.eval(evaluator, row)?;
                 // Apply the unary function to the evaluated argument
                 func.eval_unary(arg)
             }
             ScalarExpr::CallBinary { func, expr1, expr2 } => {
                 // Recursively evaluate both argument expressions
-                let left = expr1.eval(evaluator, tuple)?;
-                let right = expr2.eval(evaluator, tuple)?;
+                let left = expr1.eval(evaluator, row)?;
+                let right = expr2.eval(evaluator, row)?;
                 // Apply the binary function to the evaluated arguments
                 func.eval_binary(left, right)
             }
             ScalarExpr::FieldAccess { expr, field_name } => {
                 // Evaluate the struct expression
-                let struct_value = expr.eval(evaluator, tuple)?;
+                let struct_value = expr.eval(evaluator, row)?;
                 // Check if the result is a struct
                 if let Value::Struct(struct_val) = struct_value {
                     // Get the field value by name
@@ -144,9 +146,9 @@ impl ScalarExpr {
             }
             ScalarExpr::ListIndex { expr, index_expr } => {
                 // Evaluate the list expression
-                let list_value = expr.eval(evaluator, tuple)?;
+                let list_value = expr.eval(evaluator, row)?;
                 // Evaluate the index expression
-                let index_value = index_expr.eval(evaluator, tuple)?;
+                let index_value = index_expr.eval(evaluator, row)?;
                 
                 // Check if the list expression evaluates to a List
                 if let Value::List(list_val) = list_value {
@@ -176,7 +178,7 @@ impl ScalarExpr {
             }
             ScalarExpr::CallDf { .. } => {
                 // Use DataFusion evaluator for CallDf expressions
-                match evaluator.evaluate_expr(self, tuple) {
+                match evaluator.evaluate_expr(self, row) {
                     Ok(value) => Ok(value),
                     Err(df_error) => Err(EvalError::DataFusionError { 
                         message: df_error.to_string() 
@@ -187,7 +189,7 @@ impl ScalarExpr {
                 // Recursively evaluate all argument expressions
                 let mut arg_values = Vec::new();
                 for arg in args {
-                    arg_values.push(arg.eval(evaluator, tuple)?);
+                    arg_values.push(arg.eval(evaluator, row)?);
                 }
                 // Validate arguments before evaluation
                 CustomFunc::validate(func.as_ref(), &arg_values)?;
@@ -197,9 +199,12 @@ impl ScalarExpr {
         }
     }
 
-    /// Create a column reference expression
-    pub fn column(index: usize) -> Self {
-        ScalarExpr::Column(index)
+    /// Create a column reference expression by source and column name
+    pub fn column(source_name: impl Into<String>, column_name: impl Into<String>) -> Self {
+        ScalarExpr::Column {
+            source_name: source_name.into(),
+            column_name: column_name.into(),
+        }
     }
 
     /// Create a literal expression
@@ -258,13 +263,13 @@ impl ScalarExpr {
 
     /// Check if this expression is a column reference
     pub fn is_column(&self) -> bool {
-        matches!(self, ScalarExpr::Column(_))
+        matches!(self, ScalarExpr::Column { .. })
     }
 
-    /// Get the column index if this is a column reference
-    pub fn as_column(&self) -> Option<usize> {
-        if let ScalarExpr::Column(index) = self {
-            Some(*index)
+    /// Get the source and column names if this is a column reference
+    pub fn as_column(&self) -> Option<(&str, &str)> {
+        if let ScalarExpr::Column { source_name, column_name } = self {
+            Some((source_name, column_name))
         } else {
             None
         }
@@ -288,7 +293,7 @@ impl ScalarExpr {
 impl std::fmt::Debug for ScalarExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ScalarExpr::Column(index) => write!(f, "Column({})", index),
+            ScalarExpr::Column { source_name, column_name } => write!(f, "Column({}.{})", source_name, column_name),
             ScalarExpr::Literal(val, typ) => write!(f, "Literal({:?}, {:?})", val, typ),
             ScalarExpr::CallUnary { func, expr } => write!(f, "CallUnary({:?}, {:?})", func, expr),
             ScalarExpr::CallBinary { func, expr1, expr2 } => {
@@ -313,7 +318,7 @@ impl std::fmt::Debug for ScalarExpr {
 impl PartialEq for ScalarExpr {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (ScalarExpr::Column(a), ScalarExpr::Column(b)) => a == b,
+            (ScalarExpr::Column { source_name: sa, column_name: ca }, ScalarExpr::Column { source_name: sb, column_name: cb }) => sa == sb && ca == cb,
             (ScalarExpr::Literal(va, ta), ScalarExpr::Literal(vb, tb)) => va == vb && ta == tb,
             (ScalarExpr::CallUnary { func: fa, expr: ea }, ScalarExpr::CallUnary { func: fb, expr: eb }) => {
                 fa == fb && ea == eb
