@@ -5,6 +5,17 @@ use datafusion_common::{DataFusionError, Result as DataFusionResult, ScalarValue
 use datafusion_expr::Expr;
 use datatypes::{ConcreteDatatype, Value, Schema as FlowSchema};
 
+/// List of functions that can be called through CallDf (DataFusion functions)
+pub const DATAFUSION_FUNCTIONS: &[&str] = &[
+    "concat", "upper", "lower", "trim", "length", "substr", "substring", 
+    "round", "abs", "sqrt"
+];
+
+/// List of functions that can be called through CallFunc (custom functions)
+pub const CUSTOM_FUNCTIONS: &[&str] = &[
+    "concat",  // Note: concat is supported both as DataFusion and custom function
+];
+
 /// Convert flow Value to DataFusion ScalarValue
 pub fn value_to_scalar_value(value: &Value) -> DataFusionResult<ScalarValue> {
     match value {
@@ -93,6 +104,14 @@ pub fn flow_schema_to_arrow_schema(flow_schema: &FlowSchema) -> DataFusionResult
 
 /// Create a DataFusion function call by name
 pub fn create_df_function_call(function_name: String, args: Vec<Expr>) -> DataFusionResult<Expr> {
+    // Check if the function is in the allowed DataFusion functions list
+    if !DATAFUSION_FUNCTIONS.contains(&function_name.as_str()) {
+        return Err(DataFusionError::Plan(format!(
+            "Function '{}' is not available for CallDf. Available DataFusion functions: {:?}",
+            function_name, DATAFUSION_FUNCTIONS
+        )));
+    }
+    
     match function_name.as_str() {
         "concat" => {
             // Use DataFusion's built-in concat function
@@ -131,10 +150,9 @@ pub fn create_df_function_call(function_name: String, args: Vec<Expr>) -> DataFu
             Ok(datafusion::functions::math::sqrt().call(args))
         }
         _ => {
-            // For unknown functions, try to create a scalar function call
-            // This allows for extensibility - users can register custom functions
-            Err(DataFusionError::Plan(format!(
-                "Unknown function: {}. Supported functions: concat, upper, lower, trim, length, substr, round, abs, sqrt",
+            // This should not happen due to the check above, but keep for safety
+            Err(DataFusionError::Internal(format!(
+                "Function '{}' is in DATAFUSION_FUNCTIONS but not handled in match expression",
                 function_name
             )))
         }
@@ -162,5 +180,39 @@ impl std::error::Error for AdapterError {}
 impl From<DataFusionError> for AdapterError {
     fn from(error: DataFusionError) -> Self {
         AdapterError::DataFusionError(error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_datafusion_function_validation() {
+        // Test that all DATAFUSION_FUNCTIONS are supported
+        for &func_name in DATAFUSION_FUNCTIONS {
+            let result = create_df_function_call(func_name.to_string(), vec![]);
+            assert!(result.is_ok(), "Function '{}' should be supported", func_name);
+        }
+    }
+    
+    #[test]
+    fn test_unknown_function_error() {
+        let result = create_df_function_call("unknown_function".to_string(), vec![]);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("not available for CallDf"));
+        assert!(error_msg.contains("concat")); // Should list available functions
+    }
+    
+    #[test]
+    fn test_custom_function_list() {
+        // Verify concat is in both lists
+        assert!(DATAFUSION_FUNCTIONS.contains(&"concat"));
+        assert!(CUSTOM_FUNCTIONS.contains(&"concat"));
+        
+        // Verify other functions are only in DATAFUSION_FUNCTIONS
+        assert!(DATAFUSION_FUNCTIONS.contains(&"upper"));
+        assert!(!CUSTOM_FUNCTIONS.contains(&"upper"));
     }
 }

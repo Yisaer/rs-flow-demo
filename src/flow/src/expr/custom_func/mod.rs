@@ -4,6 +4,12 @@ use datatypes::Value;
 pub use string_func::ConcatFunc;
 use crate::expr::func::EvalError;
 
+/// List of functions that can be called through CallFunc (custom functions)
+pub const CUSTOM_FUNCTIONS: &[&str] = &[
+    "concat",
+    // Add more custom functions here as they are implemented
+];
+
 /// Custom function that can be implemented by users
 /// This trait allows users to define their own functions for evaluation
 pub trait CustomFunc: Send + Sync + std::fmt::Debug {
