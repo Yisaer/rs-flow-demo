@@ -3,38 +3,9 @@ use datatypes::{ConcreteDatatype, Value};
 use crate::expr::func::{BinaryFunc, EvalError, UnaryFunc};
 use crate::expr::datafusion_func::DataFusionEvaluator;
 use crate::model::row::Row;
+use crate::model::Collection;
 use std::sync::Arc;
-
-/// Custom function that can be implemented by users
-/// This trait allows users to define their own functions for evaluation
-pub trait CustomFunc: Send + Sync + std::fmt::Debug {
-    /// Validate the function arguments before evaluation
-    /// 
-    /// # Arguments
-    /// 
-    /// * `args` - A slice of evaluated argument values to validate
-    /// 
-    /// # Returns
-    /// 
-    /// Returns Ok(()) if arguments are valid, or an error if validation fails.
-    /// This method should check argument count, types, and other constraints.
-    fn validate(&self, args: &[Value]) -> Result<(), EvalError>;
-    
-    /// Evaluate the function with the given arguments
-    /// 
-    /// # Arguments
-    /// 
-    /// * `args` - A slice of evaluated argument values
-    /// 
-    /// # Returns
-    /// 
-    /// Returns the evaluated result, or an error if evaluation fails.
-    /// Note: This method assumes arguments have been validated by validate().
-    fn eval(&self, args: &[Value]) -> Result<Value, EvalError>;
-    
-    /// Get the function name for debugging purposes
-    fn name(&self) -> &str;
-}
+use crate::expr::custom_func::CustomFunc;
 
 /// A scalar expression, which can be evaluated to a value.
 #[derive(Clone)]
@@ -89,113 +60,182 @@ pub enum ScalarExpr {
 
 impl ScalarExpr {
 
-    /// Evaluate this expression using DataFusion evaluator when needed.
-    /// This method can handle all expression types including CallDf.
+    /// Evaluate this expression against a collection using vectorized evaluation.
+    /// This method performs vectorized evaluation where one call can process multiple rows.
     ///
     /// # Arguments
     ///
     /// * `evaluator` - The DataFusion evaluator for handling CallDf expressions
-    /// * `tuple` - The tuple containing the row data
+    /// * `collection` - The collection containing data (can be row-based or column-based)
     ///
     /// # Returns
     ///
-    /// Returns the evaluated value, or an error if evaluation fails.
-    pub fn eval(&self, evaluator: &DataFusionEvaluator, row: &dyn Row) -> Result<Value, EvalError> {
+    /// Returns a vector of evaluated values, one for each row in the collection.
+    pub fn eval_with_collection(&self, evaluator: &DataFusionEvaluator, collection: &dyn Collection) -> Result<Vec<Value>, EvalError> {
+        self.eval_vectorized(evaluator, collection)
+    }
+    
+    /// Core vectorized evaluation implementation
+    /// This is about vectorized computation, not necessarily columnar storage
+    pub fn eval_vectorized(&self, evaluator: &DataFusionEvaluator, collection: &dyn Collection) -> Result<Vec<Value>, EvalError> {
         match self {
             ScalarExpr::Column { source_name, column_name } => {
-                row.get_by_source_column(source_name, column_name)
-                    .cloned()
+                // Direct column access - most efficient case
+                collection.column_by_name(column_name)
+                    .map(|col| col.values().to_vec())
                     .ok_or_else(|| EvalError::ColumnNotFound {
                         source: source_name.clone(),
                         column: column_name.clone(),
                     })
             }
-            ScalarExpr::Literal(val, _) => Ok(val.clone()),
+            ScalarExpr::Literal(val, _) => {
+                // Literal value - create a vector of the same value
+                Ok(vec![val.clone(); collection.num_rows()])
+            }
             ScalarExpr::CallUnary { func, expr } => {
-                // Recursively evaluate the argument expression
-                let arg = expr.eval(evaluator, row)?;
-                // Apply the unary function to the evaluated argument
-                func.eval_unary(arg)
+                // Vectorized unary operation
+                let args = expr.eval_vectorized(evaluator, collection)?;
+                args.into_iter()
+                    .map(|arg| func.eval_unary(arg))
+                    .collect()
             }
             ScalarExpr::CallBinary { func, expr1, expr2 } => {
-                // Recursively evaluate both argument expressions
-                let left = expr1.eval(evaluator, row)?;
-                let right = expr2.eval(evaluator, row)?;
-                // Apply the binary function to the evaluated arguments
-                func.eval_binary(left, right)
+                // Vectorized binary operation
+                let left_vals = expr1.eval_vectorized(evaluator, collection)?;
+                let right_vals = expr2.eval_vectorized(evaluator, collection)?;
+                
+                if left_vals.len() != right_vals.len() || left_vals.len() != collection.num_rows() {
+                    return Err(EvalError::NotImplemented { feature: "Vector length mismatch in binary operation".to_string() });
+                }
+                
+                left_vals.into_iter()
+                    .zip(right_vals.into_iter())
+                    .map(|(left, right)| func.eval_binary(left, right))
+                    .collect()
             }
             ScalarExpr::FieldAccess { expr, field_name } => {
-                // Evaluate the struct expression
-                let struct_value = expr.eval(evaluator, row)?;
-                // Check if the result is a struct
-                if let Value::Struct(struct_val) = struct_value {
-                    // Get the field value by name
-                    struct_val
-                        .get_field(field_name)
-                        .cloned()
-                        .ok_or_else(|| EvalError::FieldNotFound {
-                            field_name: field_name.clone(),
-                            struct_type: format!("{:?}", struct_val.fields()),
-                        })
-                } else {
-                    Err(EvalError::TypeMismatch {
-                        expected: "Struct".to_string(),
-                        actual: format!("{:?}", struct_value),
-                    })
-                }
-            }
-            ScalarExpr::ListIndex { expr, index_expr } => {
-                // Evaluate the list expression
-                let list_value = expr.eval(evaluator, row)?;
-                // Evaluate the index expression
-                let index_value = index_expr.eval(evaluator, row)?;
-                
-                // Check if the list expression evaluates to a List
-                if let Value::List(list_val) = list_value {
-                    // Check if the index is an integer
-                    if let Value::Int64(index) = index_value {
-                        // Check if index is within bounds
-                        if index >= 0 && (index as usize) < list_val.len() {
-                            Ok(list_val.get(index as usize).unwrap().clone())
+                // Vectorized field access
+                let struct_vals = expr.eval_vectorized(evaluator, collection)?;
+                struct_vals.into_iter()
+                    .map(|struct_val| {
+                        if let Value::Struct(struct_val) = struct_val {
+                            struct_val
+                                .get_field(field_name)
+                                .cloned()
+                                .ok_or_else(|| EvalError::FieldNotFound {
+                                    field_name: field_name.clone(),
+                                    struct_type: format!("{:?}", struct_val.fields()),
+                                })
                         } else {
-                            Err(EvalError::ListIndexOutOfBounds {
-                                index: index as usize,
-                                list_length: list_val.len(),
+                            Err(EvalError::TypeMismatch {
+                                expected: "Struct".to_string(),
+                                actual: format!("{:?}", struct_val),
                             })
                         }
-                    } else {
-                        Err(EvalError::InvalidIndexType {
-                            expected: "Int64".to_string(),
-                            actual: format!("{:?}", index_value),
-                        })
-                    }
-                } else {
-                    Err(EvalError::TypeMismatch {
-                        expected: "List".to_string(),
-                        actual: format!("{:?}", list_value),
                     })
-                }
+                    .collect()
             }
-            ScalarExpr::CallDf { .. } => {
-                // Use DataFusion evaluator for CallDf expressions
-                match evaluator.evaluate_expr(self, row) {
-                    Ok(value) => Ok(value),
-                    Err(df_error) => Err(EvalError::DataFusionError { 
-                        message: df_error.to_string() 
-                    }),
+            ScalarExpr::ListIndex { expr, index_expr } => {
+                // Vectorized list indexing
+                let list_vals = expr.eval_vectorized(evaluator, collection)?;
+                let index_vals = index_expr.eval_vectorized(evaluator, collection)?;
+                
+                if list_vals.len() != index_vals.len() || list_vals.len() != collection.num_rows() {
+                    return Err(EvalError::NotImplemented { feature: "Vector length mismatch in list indexing".to_string() });
                 }
+                
+                list_vals.into_iter()
+                    .zip(index_vals.into_iter())
+                    .map(|(list_val, index_val)| {
+                        if let Value::List(list_val) = list_val {
+                            if let Value::Int64(index) = index_val {
+                                if index >= 0 && (index as usize) < list_val.len() {
+                                    Ok(list_val.get(index as usize).unwrap().clone())
+                                } else {
+                                    Err(EvalError::ListIndexOutOfBounds {
+                                        index: index as usize,
+                                        list_length: list_val.len(),
+                                    })
+                                }
+                            } else {
+                                Err(EvalError::InvalidIndexType {
+                                    expected: "Int64".to_string(),
+                                    actual: format!("{:?}", index_val),
+                                })
+                            }
+                        } else {
+                            Err(EvalError::TypeMismatch {
+                                expected: "List".to_string(),
+                                actual: format!("{:?}", list_val),
+                            })
+                        }
+                    })
+                    .collect()
+            }
+            ScalarExpr::CallDf { function_name: _, args: _ } => {
+                // Use DataFusion's native vectorized evaluation
+                evaluator.evaluate_expr_vectorized(self, collection)
+                    .map_err(|df_error| EvalError::DataFusionError { 
+                        message: df_error.to_string() 
+                    })
             }
             ScalarExpr::CallFunc { func, args } => {
-                // Recursively evaluate all argument expressions
-                let mut arg_values = Vec::new();
-                for arg in args {
-                    arg_values.push(arg.eval(evaluator, row)?);
+                // Vectorized custom function evaluation
+                // Prepare arguments as vectors (one vector per argument, containing all rows)
+                let mut arg_vectors = Vec::new();
+                for arg_expr in args {
+                    arg_vectors.push(arg_expr.eval_vectorized(evaluator, collection)?);
                 }
-                // Validate arguments before evaluation
-                CustomFunc::validate(func.as_ref(), &arg_values)?;
-                // Call the custom function with evaluated arguments
-                func.eval(&arg_values)
+                
+                // Validate vector dimensions
+                let num_rows = collection.num_rows();
+                for (i, arg_vec) in arg_vectors.iter().enumerate() {
+                    if arg_vec.len() != num_rows {
+                        return Err(EvalError::NotImplemented { 
+                            feature: format!("Argument {} has {} values, expected {}", i, arg_vec.len(), num_rows)
+                        });
+                    }
+                }
+                
+                // Use vectorized validation and evaluation
+                func.validate_vectorized(&arg_vectors)?;
+                func.eval_vectorized(&arg_vectors)
             }
+        }
+    }
+
+    /// Internal helper: evaluate a single row using vectorized evaluation
+    /// This is used for internal recursive evaluation when we need to process a single row
+    #[allow(dead_code)]
+    fn eval_single_row(&self, evaluator: &DataFusionEvaluator, _row: &dyn Row) -> Result<Value, EvalError> {
+        // For single row evaluation, we'll create a minimal schema based on what we can extract from the row
+        // This is a simplified approach - in practice you'd want more sophisticated schema inference
+        let _columns: Vec<crate::model::Column> = Vec::new();
+        let _schema_columns: Vec<datatypes::ColumnSchema> = Vec::new();
+        
+        // Try to extract some common field names and create a minimal schema
+        // For now, we'll just create a dummy schema since we don't have schema info from Row
+        let dummy_schema = datatypes::Schema::new(vec![]);
+        
+        // Since we can't get schema from Row, we'll use a different approach
+        // Create a minimal single-row collection and evaluate
+        let single_row_collection = crate::model::record_batch::RecordBatch::new(dummy_schema, vec![])
+            .map_err(|e| EvalError::NotImplemented { feature: format!("Failed to create collection: {}", e) })?;
+        
+        // Use vectorized evaluation - this will work for expressions that don't depend on specific column data
+        let results = self.eval_vectorized(evaluator, &single_row_collection)?;
+        
+        // For expressions that need actual data, we need a different approach
+        // This is a limitation of the current design - we need schema information
+        if results.is_empty() {
+            // Fallback: try to evaluate simple expressions directly
+            match self {
+                ScalarExpr::Literal(val, _) => Ok(val.clone()),
+                _ => Err(EvalError::NotImplemented { feature: "Single row evaluation requires schema information".to_string() })
+            }
+        } else {
+            results.into_iter().next()
+                .ok_or_else(|| EvalError::NotImplemented { feature: "No result from single row evaluation".to_string() })
         }
     }
 

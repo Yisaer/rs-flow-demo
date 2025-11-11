@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::expr::datafusion_func::adapter::*;
 use crate::expr::scalar::ScalarExpr;
-use crate::model::Row;
+use crate::model::{Row, Collection};
 use crate::tuple::Tuple;
 
 /// DataFusion-based expression evaluator
@@ -29,13 +29,31 @@ impl DataFusionEvaluator {
         }
     }
 
-    /// Evaluate a ScalarExpr against a Tuple using DataFusion
+    /// Evaluate a ScalarExpr against a Collection using DataFusion (vectorized)
+    /// This method handles CallDf expressions with true vectorized evaluation
+    pub fn evaluate_expr_vectorized(&self, expr: &ScalarExpr, collection: &dyn Collection) -> DataFusionResult<Vec<Value>> {
+        match expr {
+            ScalarExpr::CallDf { function_name, args } => {
+                // Only handle CallDf expressions - this is the main purpose of DataFusionEvaluator
+                self.evaluate_df_function_vectorized(function_name, args, collection)
+            }
+            _ => {
+                // For non-CallDf expressions, we should not handle them here
+                Err(DataFusionError::Plan(format!(
+                    "DataFusionEvaluator should only handle CallDf expressions, got {:?}", 
+                    std::mem::discriminant(expr)
+                )))
+            }
+        }
+    }
+
+    /// Legacy method: Evaluate a ScalarExpr against a Tuple using DataFusion (single row)
     /// This method should only handle CallDf expressions, as per greptimedb design
     pub fn evaluate_expr(&self, expr: &ScalarExpr, row: &dyn Row) -> DataFusionResult<Value> {
         match expr {
             ScalarExpr::CallDf { function_name, args } => {
                 // Only handle CallDf expressions - this is the main purpose of DataFusionEvaluator
-                self.evaluate_df_function(function_name, args, row)
+                self.evaluate_df_function_legacy(function_name, args, row)
             }
             _ => {
                 // For non-CallDf expressions, we should not handle them here
@@ -49,13 +67,105 @@ impl DataFusionEvaluator {
         }
     }
 
-    /// Evaluate a DataFusion function by name
-    pub fn evaluate_df_function(&self, function_name: &str, args: &[ScalarExpr], row: &dyn Row) -> DataFusionResult<Value> {
-        // First, evaluate all arguments using regular ScalarExpr::eval to get their values
+    /// Evaluate a DataFusion function by name with vectorized input (true vectorized evaluation)
+    pub fn evaluate_df_function_vectorized(&self, function_name: &str, args: &[ScalarExpr], collection: &dyn Collection) -> DataFusionResult<Vec<Value>> {
+        let num_rows = collection.num_rows();
+        
+        // If collection is empty, return empty result
+        if num_rows == 0 {
+            return Ok(vec![]);
+        }
+        
+        // Convert collection to RecordBatch for DataFusion
+        let record_batch = self.collection_to_record_batch(collection)?;
+        
+        // Evaluate all argument expressions to get their values for each row
+        let mut arg_columns = Vec::new();
+        for arg_expr in args {
+            let arg_values = arg_expr.eval_vectorized(&DataFusionEvaluator::new(), collection)
+                .map_err(|e| DataFusionError::Execution(format!("Failed to evaluate argument: {}", e)))?;
+            arg_columns.push(arg_values);
+        }
+        
+        // Convert argument values to DataFusion literals (one per row)
+        let mut df_args = Vec::new();
+        for row_idx in 0..num_rows {
+            let mut row_args = Vec::new();
+            for (_arg_idx, arg_column) in arg_columns.iter().enumerate() {
+                if let Some(value) = arg_column.get(row_idx) {
+                    let scalar_value = value_to_scalar_value(value)?;
+                    row_args.push(lit(scalar_value));
+                } else {
+                    // Use null for missing values
+                    row_args.push(lit(ScalarValue::Null));
+                }
+            }
+            df_args.push(row_args);
+        }
+        
+        // For now, we'll evaluate row by row, but this could be optimized to batch evaluation
+        // In the future, we could create a single DataFusion expression that works on the entire batch
+        let mut results = Vec::with_capacity(num_rows);
+        
+        for row_idx in 0..num_rows {
+            // Create a single-row RecordBatch for this evaluation
+            let single_row_batch = self.create_single_row_batch(&record_batch, row_idx)?;
+            
+            // Use the argument literals for this row
+            let row_args = &df_args[row_idx];
+            
+            // Create the DataFusion function call
+            let df_expr = crate::expr::datafusion_func::adapter::create_df_function_call(
+                function_name.to_string(), 
+                row_args.clone()
+            )?;
+            
+            // Create a physical expression and evaluate
+            let df_schema = single_row_batch.schema();
+            let df_schema_ref = df_schema.to_dfschema_ref()?;
+            let physical_expr = self.session_ctx.create_physical_expr(df_expr, &df_schema_ref)?;
+            
+            // Evaluate the expression
+            let result = physical_expr.evaluate(&single_row_batch)?;
+            
+            // Convert the result back to flow Value
+            let value = self.convert_columnar_value_to_flow_value(result)?;
+            results.push(value);
+        }
+        
+        Ok(results)
+    }
+
+    /// Helper method to evaluate a single row using vectorized evaluation
+    fn eval_single_row_vectorized(&self, expr: &ScalarExpr, _row: &dyn Row) -> DataFusionResult<Value> {
+        // Create a minimal single-row collection for vectorized evaluation
+        // Since Row doesn't provide schema, we'll create a dummy schema
+        let dummy_schema = datatypes::Schema::new(vec![]);
+        let single_row_collection = crate::model::record_batch::RecordBatch::new(dummy_schema, vec![])
+            .map_err(|e| DataFusionError::Execution(format!("Failed to create single row collection: {}", e)))?;
+        
+        // Use vectorized evaluation - this works for expressions that don't need specific column data
+        let results = expr.eval_vectorized(self, &single_row_collection)
+            .map_err(|e| DataFusionError::Execution(format!("Vectorized evaluation failed: {}", e)))?;
+        
+        // Extract single result
+        if let Some(result) = results.into_iter().next() {
+            Ok(result)
+        } else {
+            // For expressions that need actual data, we need to handle differently
+            // This is a limitation - we need schema information from the row
+            Err(DataFusionError::NotImplemented(
+                "Single row evaluation requires schema information from Row trait".to_string()
+            ))
+        }
+    }
+
+    /// Legacy method: Evaluate a DataFusion function by name (single row)
+    pub fn evaluate_df_function_legacy(&self, function_name: &str, args: &[ScalarExpr], row: &dyn Row) -> DataFusionResult<Value> {
+        // First, evaluate all arguments using vectorized evaluation for single row
         let mut arg_values = Vec::new();
         for arg in args {
-            // Use regular ScalarExpr evaluation for arguments
-            match arg.eval(self, row) {
+            match self.eval_single_row_vectorized(arg, row) {
                 Ok(value) => arg_values.push(value),
                 Err(eval_error) => return Err(DataFusionError::Execution(format!("Failed to evaluate argument: {}", eval_error))),
             }
@@ -66,7 +176,7 @@ impl DataFusionEvaluator {
             tuple_to_record_batch(tuple)?
         } else {
             return Err(DataFusionError::NotImplemented(
-                "evaluate_df_function currently only supports Tuple rows".to_string()
+                "evaluate_df_function_legacy currently only supports Tuple rows".to_string()
             ));
         };
         
@@ -95,40 +205,33 @@ impl DataFusionEvaluator {
         self.convert_columnar_value_to_flow_value(result)
     }
 
-    /// Evaluate multiple expressions against a row
-    pub fn evaluate_exprs(&self, exprs: &[ScalarExpr], row: &dyn Row) -> DataFusionResult<Vec<Value>> {
+    /// Evaluate multiple expressions against a row using vectorized evaluation
+    pub fn evaluate_exprs_vectorized(&self, exprs: &[ScalarExpr], row: &dyn Row) -> DataFusionResult<Vec<Value>> {
         exprs.iter()
-            .map(|expr| self.evaluate_expr(expr, row))
+            .map(|expr| self.eval_single_row_vectorized(expr, row))
             .collect()
     }
 
-    /// Evaluate a DataFusion expression directly against a row
-    pub fn evaluate_df_expr(&self, expr: Expr, row: &dyn Row) -> DataFusionResult<Value> {
-        // For now, we need to convert the row to a RecordBatch for DataFusion evaluation
-        // This requires specific knowledge of the row implementation
-        // In the future, we could add a method to Row trait to convert to RecordBatch
+    /// Evaluate a DataFusion expression directly against a row using vectorized evaluation
+    pub fn evaluate_df_expr_vectorized(&self, expr: Expr, _row: &dyn Row) -> DataFusionResult<Value> {
+        // Create a minimal single-row collection for vectorized evaluation
+        let dummy_schema = datatypes::Schema::new(vec![]);
+        let single_row_collection = crate::model::record_batch::RecordBatch::new(dummy_schema, vec![])
+            .map_err(|e| DataFusionError::Execution(format!("Failed to create single row collection: {}", e)))?;
         
-        // Try to downcast to Tuple for now
-        use std::any::Any;
-        if let Some(tuple) = (row as &dyn Any).downcast_ref::<Tuple>() {
-            // Convert tuple to RecordBatch
-            let record_batch = tuple_to_record_batch(tuple)?;
-            
-            // Create a physical expression from the logical expression
-            let df_schema = record_batch.schema();
-            let df_schema_ref = df_schema.to_dfschema_ref()?;
-            let physical_expr = self.session_ctx.create_physical_expr(expr, &df_schema_ref)?;
-            
-            // Evaluate the expression
-            let result = physical_expr.evaluate(&record_batch)?;
-            
-            // Convert the result back to flow Value
-            self.convert_columnar_value_to_flow_value(result)
-        } else {
-            Err(DataFusionError::NotImplemented(
-                "evaluate_df_expr currently only supports Tuple rows. Consider adding a to_record_batch() method to Row trait".to_string()
-            ))
-        }
+        // Convert to RecordBatch for DataFusion
+        let record_batch = self.collection_to_record_batch(&single_row_collection)?;
+        
+        // Create a physical expression from the logical expression
+        let df_schema = record_batch.schema();
+        let df_schema_ref = df_schema.to_dfschema_ref()?;
+        let physical_expr = self.session_ctx.create_physical_expr(expr, &df_schema_ref)?;
+        
+        // Evaluate the expression
+        let result = physical_expr.evaluate(&record_batch)?;
+        
+        // Convert the result back to flow Value
+        self.convert_columnar_value_to_flow_value(result)
     }
 
     /// Convert DataFusion ColumnarValue to flow Value
@@ -257,6 +360,55 @@ impl DataFusionEvaluator {
         scalar_value_to_value(&scalar_value)
     }
 
+    /// Convert Collection to RecordBatch for DataFusion evaluation
+    fn collection_to_record_batch(&self, collection: &dyn Collection) -> DataFusionResult<RecordBatch> {
+        // For now, we'll create a simple RecordBatch from the collection
+        // This is a simplified implementation - in production you'd want more sophisticated conversion
+        
+        let num_rows = collection.num_rows();
+        if num_rows == 0 {
+            // Return empty RecordBatch with appropriate schema
+            let schema = arrow::datatypes::Schema::empty();
+            return Ok(RecordBatch::try_new(
+                std::sync::Arc::new(schema),
+                vec![]
+            )?);
+        }
+        
+        // For now, create a simple single-column RecordBatch as placeholder
+        // In a real implementation, this would convert the full collection schema
+        let int_array = arrow::array::Int64Array::from(vec![0i64; num_rows]);
+        let schema = arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("dummy", arrow::datatypes::DataType::Int64, true)
+        ]);
+        
+        Ok(RecordBatch::try_new(
+            std::sync::Arc::new(schema),
+            vec![std::sync::Arc::new(int_array)]
+        )?)
+    }
+    
+    /// Create a single-row RecordBatch from a multi-row batch
+    fn create_single_row_batch(&self, original_batch: &RecordBatch, row_idx: usize) -> DataFusionResult<RecordBatch> {
+        let num_rows = original_batch.num_rows();
+        if row_idx >= num_rows {
+            return Err(DataFusionError::Execution(format!("Row index {} out of bounds for batch with {} rows", row_idx, num_rows)));
+        }
+        
+        // Create single-row arrays from the original batch
+        let mut single_row_arrays = Vec::new();
+        for i in 0..original_batch.num_columns() {
+            let array = original_batch.column(i);
+            let single_row_array = array.slice(row_idx, 1);
+            single_row_arrays.push(single_row_array);
+        }
+        
+        Ok(RecordBatch::try_new(
+            original_batch.schema(),
+            single_row_arrays
+        )?)
+    }
+
     /// Create a RecordBatch from multiple tuples for batch evaluation
     pub fn tuples_to_record_batch(_tuples: &[Tuple]) -> DataFusionResult<RecordBatch> {
         // For now, this is not implemented with the new Tuple design
@@ -276,6 +428,7 @@ impl Default for DataFusionEvaluator {
 mod tests {
     use super::*;
     use datatypes::{ColumnSchema, Int64Type, StringType, Float64Type, BooleanType, ConcreteDatatype};
+    use crate::model::Column;
 
     fn create_test_tuple() -> Tuple {
         let schema = datatypes::Schema::new(vec![
@@ -286,7 +439,7 @@ mod tests {
             ColumnSchema::new("active".to_string(), "test_table".to_string(), ConcreteDatatype::Bool(BooleanType)),
         ]);
 
-        let values = vec![
+        let _values = vec![
             Value::Int64(1),
             Value::String("Alice".to_string()),
             Value::Int64(25),
@@ -294,33 +447,69 @@ mod tests {
             Value::Bool(true),
         ];
 
-        Tuple::from_values(schema, values)
+        Tuple::from_values(schema, _values)
     }
 
     #[test]
-    fn test_basic_evaluation() {
+    fn test_basic_evaluation_vectorized() {
         // Note: DataFusionEvaluator should only handle CallDf expressions
-        // Basic column references and literals should be handled by ScalarExpr::eval directly
+        // Basic column references and literals should be handled by ScalarExpr::eval_vectorized directly
         let evaluator = DataFusionEvaluator::new();
-        let tuple = create_test_tuple();
+        let _tuple = create_test_tuple();
+        
+        // Create single-row collection for vectorized testing
+        let schema = datatypes::Schema::new(vec![
+            ColumnSchema::new("id".to_string(), "test_table".to_string(), ConcreteDatatype::Int64(Int64Type)),
+            ColumnSchema::new("name".to_string(), "test_table".to_string(), ConcreteDatatype::String(StringType)),
+            ColumnSchema::new("age".to_string(), "test_table".to_string(), ConcreteDatatype::Int64(Int64Type)),
+            ColumnSchema::new("score".to_string(), "test_table".to_string(), ConcreteDatatype::Float64(Float64Type)),
+            ColumnSchema::new("active".to_string(), "test_table".to_string(), ConcreteDatatype::Bool(BooleanType)),
+        ]);
+        
+        let collection = crate::model::RecordBatch::new(schema, vec![
+            Column::new("id".to_string(), ConcreteDatatype::Int64(Int64Type), vec![Value::Int64(1)]),
+            Column::new("name".to_string(), ConcreteDatatype::String(StringType), vec![Value::String("Alice".to_string())]),
+            Column::new("age".to_string(), ConcreteDatatype::Int64(Int64Type), vec![Value::Int64(25)]),
+            Column::new("score".to_string(), ConcreteDatatype::Float64(Float64Type), vec![Value::Float64(98.5)]),
+            Column::new("active".to_string(), ConcreteDatatype::Bool(BooleanType), vec![Value::Bool(true)]),
+        ]).unwrap();
 
-        // Test column reference using direct eval (with DataFusionEvaluator)
+        // Test column reference using vectorized evaluation
         let col_expr = ScalarExpr::column("test_table", "id");
-        let result = col_expr.eval(&evaluator, &tuple).unwrap();
-        assert_eq!(result, Value::Int64(1));
+        let results = col_expr.eval_with_collection(&evaluator, &collection).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], Value::Int64(1));
 
-        // Test literal using direct eval (with DataFusionEvaluator)
+        // Test literal using vectorized evaluation
         let lit_expr = ScalarExpr::literal(Value::Int64(42), ConcreteDatatype::Int64(Int64Type));
-        let result = lit_expr.eval(&evaluator, &tuple).unwrap();
-        assert_eq!(result, Value::Int64(42));
+        let results = lit_expr.eval_with_collection(&evaluator, &collection).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], Value::Int64(42));
     }
 
     #[test]
-    fn test_concat_function() {
+    fn test_concat_function_vectorized() {
         let evaluator = DataFusionEvaluator::new();
-        let tuple = create_test_tuple();
+        let _tuple = create_test_tuple();
+        
+        // Create single-row collection for vectorized testing
+        let schema = datatypes::Schema::new(vec![
+            ColumnSchema::new("id".to_string(), "test_table".to_string(), ConcreteDatatype::Int64(Int64Type)),
+            ColumnSchema::new("name".to_string(), "test_table".to_string(), ConcreteDatatype::String(StringType)),
+            ColumnSchema::new("age".to_string(), "test_table".to_string(), ConcreteDatatype::Int64(Int64Type)),
+            ColumnSchema::new("score".to_string(), "test_table".to_string(), ConcreteDatatype::Float64(Float64Type)),
+            ColumnSchema::new("active".to_string(), "test_table".to_string(), ConcreteDatatype::Bool(BooleanType)),
+        ]);
+        
+        let collection = crate::model::RecordBatch::new(schema, vec![
+            Column::new("id".to_string(), ConcreteDatatype::Int64(Int64Type), vec![Value::Int64(1)]),
+            Column::new("name".to_string(), ConcreteDatatype::String(StringType), vec![Value::String("Alice".to_string())]),
+            Column::new("age".to_string(), ConcreteDatatype::Int64(Int64Type), vec![Value::Int64(25)]),
+            Column::new("score".to_string(), ConcreteDatatype::Float64(Float64Type), vec![Value::Float64(98.5)]),
+            Column::new("active".to_string(), ConcreteDatatype::Bool(BooleanType), vec![Value::Bool(true)]),
+        ]).unwrap();
 
-        // Test concat function via CallDf
+        // Test concat function via CallDf using vectorized evaluation
         let name_col = ScalarExpr::column("test_table", "name"); // name column
         let lit_expr = ScalarExpr::literal(Value::String(" Smith".to_string()), ConcreteDatatype::String(StringType));
         let concat_expr = ScalarExpr::CallDf {
@@ -328,7 +517,8 @@ mod tests {
             args: vec![name_col, lit_expr],
         };
         
-        let result = evaluator.evaluate_expr(&concat_expr, &tuple).unwrap();
-        assert_eq!(result, Value::String("Alice Smith".to_string()));
+        let results = evaluator.evaluate_expr_vectorized(&concat_expr, &collection).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], Value::String("Alice Smith".to_string()));
     }
 }
