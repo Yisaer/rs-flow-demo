@@ -50,14 +50,14 @@ impl Processor for ControlSourceProcessor {
     
     fn start(&mut self) -> tokio::task::JoinHandle<Result<(), ProcessorError>> {
         let _id = self.id.clone();
-        let mut input = self.input.take()
+        let input_result = self.input.take()
             .ok_or_else(|| ProcessorError::InvalidConfiguration(
                 "ControlSourceProcessor input must be set before starting".to_string()
             ));
         let outputs = self.outputs.clone();
         
         tokio::spawn(async move {
-            let mut input = match input {
+            let mut input = match input_result {
                 Ok(input) => input,
                 Err(e) => return Err(e),
             };
