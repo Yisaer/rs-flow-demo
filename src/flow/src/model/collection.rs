@@ -79,18 +79,18 @@ impl Clone for Box<dyn Collection> {
 /// Column represents a column of data in columnar format
 #[derive(Debug, Clone, PartialEq)]
 pub struct Column {
-    /// Column name
-    pub name: String,
     /// Source table name (which table this column belongs to)
     pub source_name: String,
+    /// Column name
+    pub name: String,
     /// Column values
     pub data: Vec<Value>,
 }
 
 impl Column {
     /// Create a new column
-    pub fn new(name: String, source_name: String, data: Vec<Value>) -> Self {
-        Self { name, source_name, data }
+    pub fn new_2(source_name: String,name: String, data: Vec<Value>) -> Self {
+        Self { source_name,name, data }
     }
     
     /// Get the number of elements in this column

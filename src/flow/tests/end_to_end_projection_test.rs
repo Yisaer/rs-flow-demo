@@ -39,9 +39,9 @@ async fn test_end_to_end_projection_pipeline() {
         Value::Int64(3000)
     ];
     
-    let column_a = Column::new("a".to_string(), "".to_string(), col_a_values);
-    let column_b = Column::new("b".to_string(), "".to_string(), col_b_values);
-    let column_c = Column::new("c".to_string(), "".to_string(), col_c_values);
+    let column_a = Column::new_2("".to_string(), "a".to_string(), col_a_values);
+    let column_b = Column::new_2("".to_string(), "b".to_string(), col_b_values);
+    let column_c = Column::new_2("".to_string(), "c".to_string(), col_c_values);
     
     let test_batch = FlowRecordBatch::new(vec![column_a, column_b, column_c])
         .expect("Failed to create test RecordBatch");

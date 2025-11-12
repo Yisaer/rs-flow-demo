@@ -46,8 +46,8 @@ fn test_struct_field_then_list_index() {
     ]);
 
     // Create a single-row collection for vectorized testing
-    let column = Column::new(
-        "struct_col".to_string(), "test_table".to_string(),
+    let column = Column::new_2(
+        "test_table".to_string(),"struct_col".to_string(),
         vec![struct_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -123,8 +123,8 @@ fn test_list_index_then_struct_field() {
     ]);
 
     // Create a single-row collection for vectorized testing
-    let column = Column::new(
-        "list_col".to_string(), "test_table".to_string(),
+    let column = Column::new_2(
+        "test_table".to_string(),"list_col".to_string(),
         vec![list_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -207,8 +207,8 @@ fn test_complex_nested_access() {
     ]);
 
     // Create a single-row collection for vectorized testing
-    let column = Column::new(
-        "complex_col".to_string(), "test_table".to_string(),
+    let column = Column::new_2(
+        "test_table".to_string(),"complex_col".to_string(),
         vec![outer_struct_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -272,8 +272,8 @@ fn test_list_of_lists() {
     ]);
 
     // Create a single-row collection for vectorized testing
-    let column = Column::new(
-        "list_of_lists".to_string(), "test_table".to_string(),
+    let column = Column::new_2(
+        "test_table".to_string(),"list_of_lists".to_string(),
         vec![outer_list_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();

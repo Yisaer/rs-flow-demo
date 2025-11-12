@@ -34,8 +34,8 @@ fn test_field_access_simple() {
     ]);
 
     // Create a single-row collection for vectorized testing
-    let column = Column::new(
-        "struct_col".to_string(), "test_table".to_string(),
+    let column = Column::new_2(
+        "test_table".to_string(),"struct_col".to_string(),
         vec![struct_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -83,8 +83,8 @@ fn test_field_access_string_field() {
     ]);
 
     // Create a single-row collection for vectorized testing
-    let column = Column::new(
-        "struct_col".to_string(), "test_table".to_string(),
+    let column = Column::new_2(
+        "test_table".to_string(),"struct_col".to_string(),
         vec![struct_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -144,8 +144,8 @@ fn test_field_access_nested() {
     ]);
 
     // Create a single-row collection for vectorized testing
-    let column = Column::new(
-        "outer_struct".to_string(), "test_table".to_string(),
+    let column = Column::new_2(
+        "test_table".to_string(), "outer_struct".to_string(),
         vec![outer_struct_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -190,8 +190,8 @@ fn test_field_access_field_not_found() {
     ]);
 
     // Create a single-row collection for vectorized testing
-    let column = Column::new(
-        "struct_col".to_string(), "test_table".to_string(),
+    let column = Column::new_2(
+        "test_table".to_string(),"struct_col".to_string(),
         vec![struct_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -224,8 +224,8 @@ fn test_field_access_not_struct() {
     ]);
 
     // Create a single-row collection for vectorized testing
-    let column = Column::new(
-        "int_col".to_string(), "test_table".to_string(),
+    let column = Column::new_2(
+        "test_table".to_string(), "int_col".to_string(),
         vec![Value::Int32(42)]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();

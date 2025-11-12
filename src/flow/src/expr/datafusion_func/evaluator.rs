@@ -205,17 +205,17 @@ mod tests {
         let evaluator = DataFusionEvaluator::new();
         
         // Create test data: ["Hello", "World"] and [" ", " "]
-        let col1 = Column::new(
-            "col1".to_string(),
+        let col1 = Column::new_2(
             "test".to_string(),
+            "col1".to_string(),
             vec![
                 Value::String("Hello".to_string()),
                 Value::String("World".to_string())
             ]
         );
-        let col2 = Column::new(
-            "col2".to_string(),
+        let col2 = Column::new_2(
             "test".to_string(),
+            "col2".to_string(),
             vec![
                 Value::String(" ".to_string()),
                 Value::String(" ".to_string())
@@ -254,9 +254,9 @@ mod tests {
         let evaluator = DataFusionEvaluator::new();
         
         // Create test data
-        let col = Column::new(
-            "col".to_string(),
+        let col = Column::new_2(
             "test".to_string(),
+            "col".to_string(),
             vec![
                 Value::String("hello".to_string()),
                 Value::String("world".to_string())
