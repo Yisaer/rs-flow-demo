@@ -18,7 +18,7 @@ pub mod stream_processor;
 pub mod pipeline_builder;
 pub mod processor_builder;
 
-pub use stream_data::StreamData;
+pub use stream_data::{StreamData, StreamError, ControlSignal};
 pub use datasource_processor::DataSourceProcessor;
 pub use filter_processor::FilterProcessor;
 pub use project_processor::ProjectProcessor;

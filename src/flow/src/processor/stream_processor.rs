@@ -5,7 +5,7 @@
 use tokio::sync::broadcast;
 use std::sync::Arc;
 use crate::planner::physical::PhysicalPlan;
-use crate::processor::stream_data::StreamData;
+use crate::processor::stream_data::{StreamData, ControlSignal, StreamError};
 use crate::processor::ProcessorView;
 
 /// Core trait for all stream processors
@@ -62,11 +62,19 @@ pub mod utils {
     pub fn handle_receive_error(error: broadcast::error::RecvError) -> Result<StreamData, String> {
         match error {
             broadcast::error::RecvError::Lagged(_) => {
-                Ok(StreamData::control(crate::processor::stream_data::ControlSignal::Backpressure))
+                Ok(StreamData::control(ControlSignal::Backpressure))
             }
             broadcast::error::RecvError::Closed => {
-                Ok(StreamData::control(crate::processor::stream_data::ControlSignal::StreamEnd))
+                Ok(StreamData::control(ControlSignal::StreamEnd))
             }
         }
+    }
+    
+    /// Create a stream error with processor source information
+    pub fn create_stream_error(message: impl Into<String>, processor_name: &str) -> StreamData {
+        let error = StreamError::new(message)
+            .with_source(processor_name)
+            .with_timestamp(std::time::SystemTime::now());
+        StreamData::error(error)
     }
 }

@@ -28,25 +28,58 @@ pub enum StreamData {
     Collection(Box<dyn Collection>),
     /// Control signal for flow management
     Control(ControlSignal),
+    /// Error that occurred during processing - wrapped for flow continuation
+    Error(StreamError),
 }
 
-impl std::fmt::Debug for StreamData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StreamData::Collection(collection) => {
-                f.debug_struct("Collection")
-                    .field("num_rows", &collection.num_rows())
-                    .field("num_columns", &collection.num_columns())
-                    .finish()
-            }
-            StreamData::Control(signal) => {
-                f.debug_tuple("Control")
-                    .field(signal)
-                    .finish()
-            }
+/// Error type for stream processing that can be sent through the pipeline
+#[derive(Debug, Clone, PartialEq)]
+pub struct StreamError {
+    /// The error message
+    pub message: String,
+    /// Optional source processor identifier
+    pub source: Option<String>,
+    /// Optional timestamp when the error occurred
+    pub timestamp: Option<std::time::SystemTime>,
+}
+
+impl StreamError {
+    /// Create a new stream error with just a message
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            source: None,
+            timestamp: None,
         }
     }
+    
+    /// Create a new stream error with source processor
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        self.source = Some(source.into());
+        self
+    }
+    
+    /// Create a new stream error with timestamp
+    pub fn with_timestamp(mut self, timestamp: std::time::SystemTime) -> Self {
+        self.timestamp = Some(timestamp);
+        self
+    }
 }
+
+impl std::fmt::Display for StreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "StreamError: {}", self.message)?;
+        if let Some(source) = &self.source {
+            write!(f, " (from: {})", source)?;
+        }
+        if let Some(timestamp) = &self.timestamp {
+            write!(f, " at {:?}", timestamp)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for StreamError {}
 
 impl StreamData {
     /// Create Collection data
@@ -59,6 +92,16 @@ impl StreamData {
         StreamData::Control(signal)
     }
     
+    /// Create error data
+    pub fn error(error: StreamError) -> Self {
+        StreamData::Error(error)
+    }
+    
+    /// Create error from string message
+    pub fn error_message(message: impl Into<String>) -> Self {
+        StreamData::Error(StreamError::new(message))
+    }
+    
     /// Check if this is data (Collection)
     pub fn is_data(&self) -> bool {
         matches!(self, StreamData::Collection(_))
@@ -67,6 +110,11 @@ impl StreamData {
     /// Check if this is a control signal
     pub fn is_control(&self) -> bool {
         matches!(self, StreamData::Control(_))
+    }
+    
+    /// Check if this is an error
+    pub fn is_error(&self) -> bool {
+        matches!(self, StreamData::Error(_))
     }
     
     /// Check if this is a terminal signal (StreamEnd)
@@ -93,6 +141,14 @@ impl StreamData {
         }
     }
     
+    /// Extract error if present
+    pub fn as_error(&self) -> Option<&StreamError> {
+        match self {
+            StreamData::Error(error) => Some(error),
+            _ => None,
+        }
+    }
+    
     /// Get a human-readable description
     pub fn description(&self) -> String {
         match self {
@@ -100,6 +156,7 @@ impl StreamData {
                 format!("Collection with {} rows", collection.num_rows())
             }
             StreamData::Control(signal) => format!("Control signal: {:?}", signal),
+            StreamData::Error(error) => format!("Error: {}", error),
         }
     }
 }

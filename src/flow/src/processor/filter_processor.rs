@@ -8,7 +8,7 @@
 use tokio::sync::broadcast;
 use std::sync::Arc;
 use crate::planner::physical::PhysicalPlan;
-use crate::processor::{StreamProcessor, ProcessorView, ProcessorHandle, utils, StreamData};
+use crate::processor::{StreamProcessor, ProcessorView, ProcessorHandle, utils, StreamData, StreamError};
 
 /// Filter processor that corresponds to PhysicalFilter
 /// 
@@ -38,10 +38,10 @@ impl FilterProcessor {
     }
     
     /// Apply filter predicate to data (currently just passes through)
-    fn should_include(&self, _data: &dyn crate::model::Collection) -> bool {
+    fn should_include(&self, _data: &dyn crate::model::Collection) -> Result<bool, String> {
         // TODO: Implement actual filtering logic based on predicate expression
         // For now, include all data to establish pipeline
-        true
+        Ok(true)
     }
 }
 
@@ -88,6 +88,7 @@ impl FilterProcessor {
     ) -> impl std::future::Future<Output = ()> + Send + 'static {
         let mut input_receivers = self.input_receivers();
         let downstream_count = self.downstream_count;
+        let processor_name = "FilterProcessor".to_string();
         
         async move {
             println!("FilterProcessor: Starting filter routine for {} downstream processors", downstream_count);
@@ -120,21 +121,37 @@ impl FilterProcessor {
                     } => {
                         match result {
                             Ok(Ok(stream_data)) => {
-                                // Pass through data (currently no actual filtering)
+                                // Apply filter logic with error handling
                                 if stream_data.is_data() {
                                     if let Some(collection) = stream_data.as_collection() {
-                                        if Self::static_should_include_static(collection) {
-                                            // Data passes filter, send it downstream
-                                            if result_tx.send(Ok(stream_data)).is_err() {
-                                                println!("FilterProcessor: All downstream receivers dropped, stopping");
-                                                break;
+                                        match Self::static_should_include_static(collection) {
+                                            Ok(should_include) => {
+                                                if should_include {
+                                                    // Data passes filter, send it downstream
+                                                    if result_tx.send(Ok(stream_data)).is_err() {
+                                                        println!("FilterProcessor: All downstream receivers dropped, stopping");
+                                                        break;
+                                                    }
+                                                } else {
+                                                    println!("FilterProcessor: Data filtered out");
+                                                }
                                             }
-                                        } else {
-                                            println!("FilterProcessor: Data filtered out");
+                                            Err(filter_error) => {
+                                                // Filter processing error - send as StreamData::Error instead of stopping
+                                                println!("FilterProcessor: Error during filtering: {}", filter_error);
+                                                let stream_error = StreamError::new(filter_error)
+                                                    .with_source(&processor_name)
+                                                    .with_timestamp(std::time::SystemTime::now());
+                                                
+                                                if result_tx.send(Ok(StreamData::error(stream_error))).is_err() {
+                                                    println!("FilterProcessor: All downstream receivers dropped, stopping");
+                                                    break;
+                                                }
+                                            }
                                         }
                                     }
                                 } else {
-                                    // Pass through control signals
+                                    // Pass through control signals and errors
                                     if result_tx.send(Ok(stream_data)).is_err() {
                                         println!("FilterProcessor: All downstream receivers dropped, stopping");
                                         break;
@@ -143,8 +160,12 @@ impl FilterProcessor {
                             }
                             Ok(Err(e)) => {
                                 println!("FilterProcessor: Error from upstream: {}", e);
-                                // Forward error downstream
-                                if result_tx.send(Err(e)).is_err() {
+                                // Forward upstream error as StreamData::Error
+                                let stream_error = StreamError::new(e)
+                                    .with_source("upstream")
+                                    .with_timestamp(std::time::SystemTime::now());
+                                
+                                if result_tx.send(Ok(StreamData::error(stream_error))).is_err() {
                                     println!("FilterProcessor: All downstream receivers dropped, stopping");
                                     break;
                                 }
@@ -172,8 +193,8 @@ impl FilterProcessor {
     }
     
     /// Static version of should_include for use in async routine
-    fn static_should_include_static(_data: &dyn crate::model::Collection) -> bool {
+    fn static_should_include_static(_data: &dyn crate::model::Collection) -> Result<bool, String> {
         // TODO: Implement actual filtering logic
-        true
+        Ok(true)
     }
 }

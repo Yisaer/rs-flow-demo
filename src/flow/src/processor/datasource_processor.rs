@@ -8,7 +8,7 @@
 use tokio::sync::broadcast;
 use std::sync::Arc;
 use crate::planner::physical::PhysicalPlan;
-use crate::processor::{StreamProcessor, ProcessorView, ProcessorHandle, utils, StreamData};
+use crate::processor::{StreamProcessor, ProcessorView, ProcessorHandle, utils, StreamData, StreamError};
 
 /// DataSource processor that corresponds to PhysicalDataSource
 /// 
@@ -90,6 +90,7 @@ impl DataSourceProcessor {
         mut stop_rx: broadcast::Receiver<()>,
     ) -> impl std::future::Future<Output = ()> + Send + 'static {
         let downstream_count = self.downstream_count;
+        let processor_name = "DataSourceProcessor".to_string();
         
         async move {
             println!("DataSourceProcessor: Starting data source routine for {} downstream processors", downstream_count);
@@ -119,8 +120,14 @@ impl DataSourceProcessor {
                 }
                 Err(e) => {
                     println!("DataSourceProcessor: Error generating data: {}", e);
-                    // Send error to downstream
-                    let _ = result_tx.send(Err(e));
+                    // Send error as StreamData::Error instead of stopping the flow
+                    let stream_error = StreamError::new(e)
+                        .with_source(&processor_name)
+                        .with_timestamp(std::time::SystemTime::now());
+                    
+                    if result_tx.send(Ok(StreamData::error(stream_error))).is_err() {
+                        println!("DataSourceProcessor: Failed to send error to downstream");
+                    }
                 }
             }
             

@@ -8,7 +8,7 @@
 use tokio::sync::broadcast;
 use std::sync::Arc;
 use crate::planner::physical::PhysicalPlan;
-use crate::processor::{StreamProcessor, ProcessorView, ProcessorHandle, utils, StreamData};
+use crate::processor::{StreamProcessor, ProcessorView, ProcessorHandle, utils, StreamData, StreamError};
 
 /// Project processor that corresponds to PhysicalProject
 /// 
@@ -88,6 +88,7 @@ impl ProjectProcessor {
     ) -> impl std::future::Future<Output = ()> + Send + 'static {
         let mut input_receivers = self.input_receivers();
         let downstream_count = self.downstream_count;
+        let processor_name = "ProjectProcessor".to_string();
         
         async move {
             println!("ProjectProcessor: Starting project routine for {} downstream processors", downstream_count);
@@ -120,7 +121,7 @@ impl ProjectProcessor {
                     } => {
                         match result {
                             Ok(Ok(stream_data)) => {
-                                // Apply projection (currently just passes through)
+                                // Apply projection logic with error handling
                                 if stream_data.is_data() {
                                     if let Some(collection) = stream_data.as_collection() {
                                         match Self::static_project_data_static(collection) {
@@ -131,9 +132,14 @@ impl ProjectProcessor {
                                                     break;
                                                 }
                                             }
-                                            Err(e) => {
-                                                println!("ProjectProcessor: Error projecting data: {}", e);
-                                                if result_tx.send(Err(e.to_string())).is_err() {
+                                            Err(projection_error) => {
+                                                // Projection processing error - send as StreamData::Error instead of stopping
+                                                println!("ProjectProcessor: Error during projection: {}", projection_error);
+                                                let stream_error = StreamError::new(projection_error.to_string())
+                                                    .with_source(&processor_name)
+                                                    .with_timestamp(std::time::SystemTime::now());
+                                                
+                                                if result_tx.send(Ok(StreamData::error(stream_error))).is_err() {
                                                     println!("ProjectProcessor: All downstream receivers dropped, stopping");
                                                     break;
                                                 }
@@ -141,7 +147,7 @@ impl ProjectProcessor {
                                         }
                                     }
                                 } else {
-                                    // Pass through control signals
+                                    // Pass through control signals and errors
                                     if result_tx.send(Ok(stream_data)).is_err() {
                                         println!("ProjectProcessor: All downstream receivers dropped, stopping");
                                         break;
@@ -150,8 +156,12 @@ impl ProjectProcessor {
                             }
                             Ok(Err(e)) => {
                                 println!("ProjectProcessor: Error from upstream: {}", e);
-                                // Forward error downstream
-                                if result_tx.send(Err(e)).is_err() {
+                                // Forward upstream error as StreamData::Error
+                                let stream_error = StreamError::new(e)
+                                    .with_source("upstream")
+                                    .with_timestamp(std::time::SystemTime::now());
+                                
+                                if result_tx.send(Ok(StreamData::error(stream_error))).is_err() {
                                     println!("ProjectProcessor: All downstream receivers dropped, stopping");
                                     break;
                                 }
