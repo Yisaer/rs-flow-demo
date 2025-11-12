@@ -28,12 +28,9 @@ async fn test_single_data_source_pipeline() {
     
     // Try to receive data - should at least get stream start
     match result_receiver.try_recv() {
-        Ok(Ok(stream_data)) => {
+        Ok(stream_data) => {
             println!("Received stream data: {:?}", stream_data.description());
             assert!(stream_data.is_control(), "Expected control signal");
-        }
-        Ok(Err(e)) => {
-            println!("Received error: {}", e);
         }
         Err(broadcast::error::TryRecvError::Empty) => {
             println!("No data available yet - this is expected");

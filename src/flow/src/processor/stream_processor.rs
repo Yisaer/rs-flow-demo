@@ -36,7 +36,7 @@ pub trait StreamProcessor: Send + Sync {
     fn downstream_count(&self) -> usize;
     
     /// Get input channels from upstream processors
-    fn input_receivers(&self) -> Vec<broadcast::Receiver<Result<StreamData, String>>>;
+    fn input_receivers(&self) -> Vec<broadcast::Receiver<StreamData>>;
 }
 
 /// Common utilities for stream processors
@@ -44,7 +44,7 @@ pub mod utils {
     use super::*;
     
     /// Create a broadcast channel with appropriate capacity based on downstream count
-    pub fn create_result_channel(downstream_count: usize) -> (broadcast::Sender<Result<StreamData, String>>, broadcast::Receiver<Result<StreamData, String>>) {
+    pub fn create_result_channel(downstream_count: usize) -> (broadcast::Sender<StreamData>, broadcast::Receiver<StreamData>) {
         // Base capacity + additional capacity per downstream
         let base_capacity = 1024;
         let additional_capacity = downstream_count * 256;
@@ -58,14 +58,14 @@ pub mod utils {
         broadcast::channel(1)
     }
     
-    /// Handle broadcast receive errors in a standardized way
-    pub fn handle_receive_error(error: broadcast::error::RecvError) -> Result<StreamData, String> {
+    /// Handle broadcast receive errors by converting them to appropriate StreamData
+    pub fn handle_receive_error(error: broadcast::error::RecvError) -> StreamData {
         match error {
             broadcast::error::RecvError::Lagged(_) => {
-                Ok(StreamData::control(ControlSignal::Backpressure))
+                StreamData::control(ControlSignal::Backpressure)
             }
             broadcast::error::RecvError::Closed => {
-                Ok(StreamData::control(ControlSignal::StreamEnd))
+                StreamData::control(ControlSignal::StreamEnd)
             }
         }
     }

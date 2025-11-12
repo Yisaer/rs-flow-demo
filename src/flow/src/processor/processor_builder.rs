@@ -13,8 +13,8 @@ use crate::processor::stream_data::StreamData;
 pub struct ProcessorBuildResult {
     /// The built processor
     pub processor: Arc<dyn StreamProcessor>,
-    /// Channel for receiving data from this processor
-    pub output_receiver: broadcast::Receiver<Result<StreamData, String>>,
+    /// Channel for receiving data from this processor (StreamData directly, no Result wrapper)
+    pub output_receiver: broadcast::Receiver<StreamData>,
 }
 
 impl std::fmt::Debug for ProcessorBuildResult {

@@ -9,8 +9,8 @@ use crate::processor::StreamData;
 /// View for controlling and monitoring a stream processor
 #[derive(Debug)]
 pub struct ProcessorView {
-    /// Channel for receiving processed results
-    pub result_receiver: broadcast::Receiver<Result<StreamData, String>>,
+    /// Channel for receiving processed results (StreamData directly, no wrapper Result)
+    pub result_receiver: broadcast::Receiver<StreamData>,
     /// Channel for sending stop signal to the processor
     pub stop_sender: broadcast::Sender<()>,
     /// Handle to the processor task
@@ -44,7 +44,7 @@ impl ProcessorHandle {
 impl ProcessorView {
     /// Create a new processor view
     pub fn new(
-        result_receiver: broadcast::Receiver<Result<StreamData, String>>,
+        result_receiver: broadcast::Receiver<StreamData>,
         stop_sender: broadcast::Sender<()>,
         task_handle: ProcessorHandle,
     ) -> Self {
@@ -61,7 +61,7 @@ impl ProcessorView {
     }
     
     /// Get a new receiver for the result channel
-    pub fn result_resubscribe(&self) -> broadcast::Receiver<Result<StreamData, String>> {
+    pub fn result_resubscribe(&self) -> broadcast::Receiver<StreamData> {
         self.result_receiver.resubscribe()
     }
     

@@ -18,7 +18,7 @@ pub struct ProjectProcessor {
     /// The physical plan this processor corresponds to
     physical_plan: Arc<dyn PhysicalPlan>,
     /// Input channels from upstream processors
-    input_receivers: Vec<broadcast::Receiver<Result<StreamData, String>>>,
+    input_receivers: Vec<broadcast::Receiver<StreamData>>,
     /// Number of downstream processors this will broadcast to
     downstream_count: usize,
 }
@@ -27,7 +27,7 @@ impl ProjectProcessor {
     /// Create a new ProjectProcessor
     pub fn new(
         physical_plan: Arc<dyn PhysicalPlan>,
-        input_receivers: Vec<broadcast::Receiver<Result<StreamData, String>>>,
+        input_receivers: Vec<broadcast::Receiver<StreamData>>,
         downstream_count: usize,
     ) -> Self {
         Self {
@@ -71,7 +71,7 @@ impl StreamProcessor for ProjectProcessor {
         self.downstream_count
     }
     
-    fn input_receivers(&self) -> Vec<broadcast::Receiver<Result<StreamData, String>>> {
+    fn input_receivers(&self) -> Vec<broadcast::Receiver<StreamData>> {
         self.input_receivers.iter()
             .map(|rx| rx.resubscribe())
             .collect()
@@ -83,7 +83,7 @@ impl ProjectProcessor {
     /// Create project routine that runs in tokio task - currently just passes data through
     fn create_project_routine(
         &self,
-        result_tx: broadcast::Sender<Result<StreamData, String>>,
+        result_tx: broadcast::Sender<StreamData>,
         mut stop_rx: broadcast::Receiver<()>,
     ) -> impl std::future::Future<Output = ()> + Send + 'static {
         let mut input_receivers = self.input_receivers();
@@ -94,7 +94,7 @@ impl ProjectProcessor {
             println!("ProjectProcessor: Starting project routine for {} downstream processors", downstream_count);
             
             // Send stream start signal
-            if result_tx.send(Ok(StreamData::stream_start())).is_err() {
+            if result_tx.send(StreamData::stream_start()).is_err() {
                 println!("ProjectProcessor: Failed to send start signal");
                 return;
             }
@@ -116,18 +116,18 @@ impl ProjectProcessor {
                             receiver.recv().await
                         } else {
                             // No input receivers, this might be an error case
-                            Err(broadcast::error::RecvError::Closed)
+                            futures::future::pending::<Result<StreamData, broadcast::error::RecvError>>().await
                         }
                     } => {
                         match result {
-                            Ok(Ok(stream_data)) => {
+                            Ok(stream_data) => {
                                 // Apply projection logic with error handling
                                 if stream_data.is_data() {
                                     if let Some(collection) = stream_data.as_collection() {
                                         match Self::static_project_data_static(collection) {
                                             Ok(projected_data) => {
                                                 let projected_stream_data = StreamData::collection(projected_data);
-                                                if result_tx.send(Ok(projected_stream_data)).is_err() {
+                                                if result_tx.send(projected_stream_data).is_err() {
                                                     println!("ProjectProcessor: All downstream receivers dropped, stopping");
                                                     break;
                                                 }
@@ -139,7 +139,7 @@ impl ProjectProcessor {
                                                     .with_source(&processor_name)
                                                     .with_timestamp(std::time::SystemTime::now());
                                                 
-                                                if result_tx.send(Ok(StreamData::error(stream_error))).is_err() {
+                                                if result_tx.send(StreamData::error(stream_error)).is_err() {
                                                     println!("ProjectProcessor: All downstream receivers dropped, stopping");
                                                     break;
                                                 }
@@ -148,22 +148,10 @@ impl ProjectProcessor {
                                     }
                                 } else {
                                     // Pass through control signals and errors
-                                    if result_tx.send(Ok(stream_data)).is_err() {
+                                    if result_tx.send(stream_data).is_err() {
                                         println!("ProjectProcessor: All downstream receivers dropped, stopping");
                                         break;
                                     }
-                                }
-                            }
-                            Ok(Err(e)) => {
-                                println!("ProjectProcessor: Error from upstream: {}", e);
-                                // Forward upstream error as StreamData::Error
-                                let stream_error = StreamError::new(e)
-                                    .with_source("upstream")
-                                    .with_timestamp(std::time::SystemTime::now());
-                                
-                                if result_tx.send(Ok(StreamData::error(stream_error))).is_err() {
-                                    println!("ProjectProcessor: All downstream receivers dropped, stopping");
-                                    break;
                                 }
                             }
                             Err(e) => {
@@ -180,7 +168,7 @@ impl ProjectProcessor {
             }
             
             // Send stream end signal
-            if result_tx.send(Ok(StreamData::stream_end())).is_err() {
+            if result_tx.send(StreamData::stream_end()).is_err() {
                 println!("ProjectProcessor: Failed to send end signal");
             }
             

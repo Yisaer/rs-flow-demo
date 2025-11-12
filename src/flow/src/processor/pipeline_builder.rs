@@ -74,7 +74,7 @@ fn build_processor_node(
 fn build_data_source_processor(
     _data_source: &PhysicalDataSource,
     physical_plan: Arc<dyn PhysicalPlan>,
-    upstream_receivers: Vec<broadcast::Receiver<Result<StreamData, String>>>,
+    upstream_receivers: Vec<broadcast::Receiver<StreamData>>,
 ) -> Result<ProcessorNode, String> {
     // For now, assume 1 downstream processor (can be improved later)
     let downstream_count = 1;
@@ -98,7 +98,7 @@ fn build_data_source_processor(
 fn build_filter_processor(
     _filter: &PhysicalFilter,
     physical_plan: Arc<dyn PhysicalPlan>,
-    upstream_receivers: Vec<broadcast::Receiver<Result<StreamData, String>>>,
+    upstream_receivers: Vec<broadcast::Receiver<StreamData>>,
 ) -> Result<ProcessorNode, String> {
     let downstream_count = 1;
     
@@ -121,7 +121,7 @@ fn build_filter_processor(
 fn build_project_processor(
     _project: &PhysicalProject,
     physical_plan: Arc<dyn PhysicalPlan>,
-    upstream_receivers: Vec<broadcast::Receiver<Result<StreamData, String>>>,
+    upstream_receivers: Vec<broadcast::Receiver<StreamData>>,
 ) -> Result<ProcessorNode, String> {
     let downstream_count = 1;
     

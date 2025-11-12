@@ -19,7 +19,7 @@ pub struct DataSourceProcessor {
     physical_plan: Arc<dyn PhysicalPlan>,
     /// Input channels from children (upstream processors)
     /// For DataSource, this is typically empty, but we support it for flexibility
-    input_receivers: Vec<broadcast::Receiver<Result<StreamData, String>>>,
+    input_receivers: Vec<broadcast::Receiver<StreamData>>,
     /// Number of downstream processors this will broadcast to
     downstream_count: usize,
 }
@@ -28,7 +28,7 @@ impl DataSourceProcessor {
     /// Create a new DataSourceProcessor with specified downstream count and upstream receivers
     pub fn new(
         physical_plan: Arc<dyn PhysicalPlan>,
-        input_receivers: Vec<broadcast::Receiver<Result<StreamData, String>>>,
+        input_receivers: Vec<broadcast::Receiver<StreamData>>,
         downstream_count: usize,
     ) -> Self {
         Self {
@@ -75,7 +75,7 @@ impl StreamProcessor for DataSourceProcessor {
         self.downstream_count
     }
     
-    fn input_receivers(&self) -> Vec<broadcast::Receiver<Result<StreamData, String>>> {
+    fn input_receivers(&self) -> Vec<broadcast::Receiver<StreamData>> {
         self.input_receivers.iter()
             .map(|rx| rx.resubscribe())
             .collect()
@@ -88,7 +88,7 @@ impl DataSourceProcessor {
     /// Now handles both data generation and upstream input processing
     fn create_datasource_routine(
         &self,
-        result_tx: broadcast::Sender<Result<StreamData, String>>,
+        result_tx: broadcast::Sender<StreamData>,
         mut stop_rx: broadcast::Receiver<()>,
     ) -> impl std::future::Future<Output = ()> + Send + 'static {
         let downstream_count = self.downstream_count;
@@ -100,7 +100,7 @@ impl DataSourceProcessor {
                      downstream_count, input_receivers.len());
             
             // Send stream start signal
-            if result_tx.send(Ok(StreamData::stream_start())).is_err() {
+            if result_tx.send(StreamData::stream_start()).is_err() {
                 println!("DataSourceProcessor: Failed to send start signal");
                 return;
             }
@@ -119,19 +119,10 @@ impl DataSourceProcessor {
                             }
                             result = receiver.recv() => {
                                 match result {
-                                    Ok(Ok(stream_data)) => {
+                                    Ok(stream_data) => {
                                         // Pass through upstream data (unusual for data source)
-                                        if result_tx.send(Ok(stream_data)).is_err() {
+                                        if result_tx.send(stream_data).is_err() {
                                             println!("DataSourceProcessor: All downstream receivers dropped");
-                                            return;
-                                        }
-                                    }
-                                    Ok(Err(e)) => {
-                                        // Forward upstream error
-                                        let stream_error = StreamError::new(e)
-                                            .with_source("upstream")
-                                            .with_timestamp(std::time::SystemTime::now());
-                                        if result_tx.send(Ok(StreamData::error(stream_error))).is_err() {
                                             return;
                                         }
                                     }
@@ -158,7 +149,7 @@ impl DataSourceProcessor {
                                 break;
                             }
                             
-                            if result_tx.send(Ok(StreamData::collection(data))).is_err() {
+                            if result_tx.send(StreamData::collection(data)).is_err() {
                                 // All downstream receivers dropped, stop processing
                                 println!("DataSourceProcessor: All downstream receivers dropped, stopping");
                                 break;
@@ -172,7 +163,7 @@ impl DataSourceProcessor {
                             .with_source(&processor_name)
                             .with_timestamp(std::time::SystemTime::now());
                         
-                        if result_tx.send(Ok(StreamData::error(stream_error))).is_err() {
+                        if result_tx.send(StreamData::error(stream_error)).is_err() {
                             println!("DataSourceProcessor: Failed to send error to downstream");
                         }
                     }
@@ -180,7 +171,7 @@ impl DataSourceProcessor {
             }
             
             // Send stream end signal
-            if result_tx.send(Ok(StreamData::stream_end())).is_err() {
+            if result_tx.send(StreamData::stream_end()).is_err() {
                 println!("DataSourceProcessor: Failed to send end signal");
             }
             
