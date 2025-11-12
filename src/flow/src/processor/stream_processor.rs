@@ -1,6 +1,9 @@
 //! Stream processor trait and common utilities
 //! 
 //! Defines the core StreamProcessor interface and shared utilities for all processors.
+//! 
+//! Redesigned to use StreamData::Control signals for all control operations,
+//! eliminating the need for separate stop channels.
 
 use tokio::sync::broadcast;
 use crate::processor::stream_data::{StreamData, ControlSignal, StreamError};
@@ -15,7 +18,7 @@ use crate::processor::ProcessorView;
 /// 1. Constructor takes configuration and input receivers
 /// 2. `start()` method spawns tokio task and returns ProcessorView
 /// 3. Each processor implements data processing routine with tokio::select!
-/// 4. Supports graceful shutdown via broadcast channels
+/// 4. Supports graceful shutdown via StreamData::Control signals
 /// 5. Handles multiple input sources and output broadcasting
 /// 
 /// Note: This trait is designed to work with both PhysicalPlan-based processors
@@ -24,9 +27,12 @@ pub trait StreamProcessor: Send + Sync {
     /// Start the processor and return a view for control and output
     /// 
     /// This method should:
-    /// 1. Create necessary channels (stop, result)
+    /// 1. Create necessary channels (result channel only, no stop channel)
     /// 2. Spawn a tokio task for the processor routine
     /// 3. Return a ProcessorView for external control and data consumption
+    /// 
+    /// Processors should listen for StreamData::Control(ControlSignal::StreamEnd) 
+    /// in their main processing loop to handle graceful shutdown.
     fn start(&self) -> ProcessorView;
     
     /// Get the number of downstream processors this will broadcast to
@@ -51,11 +57,6 @@ pub mod utils {
         broadcast::channel(total_capacity)
     }
     
-    /// Create a stop channel for graceful shutdown
-    pub fn create_stop_channel() -> (broadcast::Sender<()>, broadcast::Receiver<()>) {
-        broadcast::channel(1)
-    }
-    
     /// Handle broadcast receive errors by converting them to appropriate StreamData
     pub fn handle_receive_error(error: broadcast::error::RecvError) -> StreamData {
         match error {
@@ -74,5 +75,10 @@ pub mod utils {
             .with_source(processor_name)
             .with_timestamp(std::time::SystemTime::now());
         StreamData::error(error)
+    }
+    
+    /// Check if a StreamData item is a stop/termination signal
+    pub fn is_stop_signal(stream_data: &StreamData) -> bool {
+        matches!(stream_data, StreamData::Control(ControlSignal::StreamEnd))
     }
 }

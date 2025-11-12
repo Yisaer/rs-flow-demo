@@ -2,6 +2,8 @@
 //! 
 //! This processor acts as a pipeline exit point that collects final processed data
 //! and forwards it to external consumers via a result channel.
+//! 
+//! Now uses StreamData::Control signals for shutdown, eliminating separate stop channels.
 
 use tokio::sync::broadcast;
 use crate::processor::{StreamProcessor, ProcessorView, ProcessorHandle, utils, StreamData};
@@ -64,18 +66,21 @@ impl ResultSinkProcessor {
 
 impl StreamProcessor for ResultSinkProcessor {
     fn start(&self) -> ProcessorView {
-        // Create channels using utils
+        // Create only result channel - no stop channel needed
         let (result_tx, result_rx) = utils::create_result_channel(self.downstream_count);
-        let (stop_tx, stop_rx) = utils::create_stop_channel();
+        
+        // Clone the sender for the view (for external forwarding)
+        let result_sender_clone = self.result_sender.clone();
         
         // Spawn the result sink routine
-        let routine = self.create_result_sink_routine(result_tx, stop_rx);
+        let routine = self.create_result_sink_routine(result_tx);
         
         let join_handle = tokio::spawn(routine);
         
+        // For ResultSinkProcessor, we use the result sender for external forwarding
         ProcessorView::new(
+            Some(result_sender_clone),
             result_rx,
-            stop_tx,
             ProcessorHandle::new(join_handle),
         )
     }
@@ -94,10 +99,10 @@ impl StreamProcessor for ResultSinkProcessor {
 // Private helper methods
 impl ResultSinkProcessor {
     /// Create result sink routine that runs in tokio task
+    /// Uses StreamData::Control signals for shutdown instead of separate stop channel
     fn create_result_sink_routine(
         &self,
         _result_tx: broadcast::Sender<StreamData>, // Internal result channel (not used for external forwarding)
-        mut stop_rx: broadcast::Receiver<()>,
     ) -> impl std::future::Future<Output = ()> + Send + 'static {
         let mut input_receivers = self.input_receivers();
         let result_sender = self.result_sender.clone();
@@ -108,53 +113,42 @@ impl ResultSinkProcessor {
             
             // Main collection loop
             loop {
-                tokio::select! {
-                    // Check stop signal
-                    _ = stop_rx.recv() => {
-                        println!("{}: Received stop signal, shutting down", processor_name);
-                        
-                        // Send final end signal to external consumers
-                        let _ = result_sender.send(StreamData::stream_end());
-                        break;
+                // Receive processed data from upstream
+                let upstream_result = async {
+                    if let Some(receiver) = input_receivers.get_mut(0) {
+                        receiver.recv().await
+                    } else {
+                        // No upstream input, wait indefinitely
+                        futures::future::pending::<Result<StreamData, broadcast::error::RecvError>>().await
                     }
-                    
-                    // Receive processed data from upstream
-                    upstream_result = async {
-                        if let Some(receiver) = input_receivers.get_mut(0) {
-                            receiver.recv().await
-                        } else {
-                            // No upstream input, wait indefinitely
-                            futures::future::pending::<Result<StreamData, broadcast::error::RecvError>>().await
+                };
+                
+                match upstream_result.await {
+                    Ok(stream_data) => {
+                        println!("{}: Received processed data: {:?}", processor_name, stream_data.description());
+                        
+                        // Check if this is a terminal signal
+                        let is_terminal = stream_data.is_terminal();
+                        
+                        // Forward to external consumers (clone to avoid move)
+                        if result_sender.send(stream_data.clone()).is_err() {
+                            println!("{}: No external consumers remaining, continuing to collect", processor_name);
+                            // Continue collecting even if no external consumers
+                            // This prevents data loss in the pipeline
                         }
-                    } => {
-                        match upstream_result {
-                            Ok(stream_data) => {
-                                println!("{}: Received processed data: {:?}", processor_name, stream_data.description());
-                                
-                                // Check if this is a terminal signal before forwarding
-                                let is_terminal = stream_data.is_terminal();
-                                
-                                // Forward to external consumers (clone to avoid move)
-                                if result_sender.send(stream_data.clone()).is_err() {
-                                    println!("{}: No external consumers remaining, continuing to collect", processor_name);
-                                    // Continue collecting even if no external consumers
-                                    // This prevents data loss in the pipeline
-                                }
-                                
-                                if is_terminal {
-                                    println!("{}: Received terminal signal, completing collection", processor_name);
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                // Handle broadcast errors from upstream
-                                let error_data = utils::handle_receive_error(e);
-                                println!("{}: Upstream error: {:?}", processor_name, error_data.description());
-                                
-                                // Forward error to external consumers
-                                let _ = result_sender.send(error_data);
-                            }
+                        
+                        if is_terminal {
+                            println!("{}: Received terminal signal, completing collection", processor_name);
+                            break;
                         }
+                    }
+                    Err(e) => {
+                        // Handle broadcast errors from upstream
+                        let error_data = utils::handle_receive_error(e);
+                        println!("{}: Upstream error: {:?}", processor_name, error_data.description());
+                        
+                        // Forward error to external consumers
+                        let _ = result_sender.send(error_data);
                     }
                 }
             }

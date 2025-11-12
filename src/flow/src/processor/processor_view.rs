@@ -1,18 +1,24 @@
 //! Processor view and handle for controlling stream processors
 //! 
 //! Provides control mechanisms for starting, stopping and monitoring stream processors.
+//! 
+//! Redesigned to use StreamData::Control signals for all control operations,
+//! eliminating the need for separate stop channels.
 
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
-use crate::processor::StreamData;
+use crate::processor::{StreamData, ControlSignal};
 
 /// View for controlling and monitoring a stream processor
+/// 
+/// Now uses StreamData::Control signals for all control operations,
+/// providing a unified communication channel for both data and control.
 #[derive(Debug)]
 pub struct ProcessorView {
-    /// Channel for receiving processed results (StreamData directly, no wrapper Result)
+    /// Sender for injecting control signals into the processor
+    pub control_sender: Option<broadcast::Sender<StreamData>>,
+    /// Channel for receiving processed results and control signals (unified)
     pub result_receiver: broadcast::Receiver<StreamData>,
-    /// Channel for sending stop signal to the processor
-    pub stop_sender: broadcast::Sender<()>,
     /// Handle to the processor task
     pub task_handle: ProcessorHandle,
 }
@@ -44,20 +50,50 @@ impl ProcessorHandle {
 impl ProcessorView {
     /// Create a new processor view
     pub fn new(
+        control_sender: Option<broadcast::Sender<StreamData>>,
         result_receiver: broadcast::Receiver<StreamData>,
-        stop_sender: broadcast::Sender<()>,
         task_handle: ProcessorHandle,
     ) -> Self {
         Self {
+            control_sender,
             result_receiver,
-            stop_sender,
             task_handle,
         }
     }
     
-    /// Send stop signal to the processor
-    pub fn stop(&self) -> Result<usize, broadcast::error::SendError<()>> {
-        self.stop_sender.send(())
+    /// Create a processor view with only result receiver (for backward compatibility)
+    pub fn from_result_receiver(
+        result_receiver: broadcast::Receiver<StreamData>,
+        task_handle: ProcessorHandle,
+    ) -> Self {
+        Self {
+            control_sender: None,
+            result_receiver,
+            task_handle,
+        }
+    }
+    
+    /// Send stop signal to the processor using StreamData::Control
+    pub fn stop(&self) -> Result<usize, broadcast::error::SendError<StreamData>> {
+        if let Some(ref sender) = self.control_sender {
+            let stop_signal = StreamData::control(ControlSignal::StreamEnd);
+            sender.send(stop_signal)
+        } else {
+            // For processors without control sender, we can't send stop signals
+            // Return Ok(0) to indicate no action was taken
+            Ok(0)
+        }
+    }
+    
+    /// Send a control signal to the processor
+    pub fn send_control(&self, signal: ControlSignal) -> Result<usize, broadcast::error::SendError<StreamData>> {
+        if let Some(ref sender) = self.control_sender {
+            let control_data = StreamData::control(signal);
+            sender.send(control_data)
+        } else {
+            // For processors without control sender, we can't send control signals
+            Ok(0)
+        }
     }
     
     /// Get a new receiver for the result channel
@@ -73,5 +109,20 @@ impl ProcessorView {
     /// Get the number of active downstream receivers
     pub fn active_receiver_count(&self) -> usize {
         self.result_receiver.len()
+    }
+    
+    /// Send a flush signal to the processor
+    pub fn flush(&self) -> Result<usize, broadcast::error::SendError<StreamData>> {
+        self.send_control(ControlSignal::Flush)
+    }
+    
+    /// Send a backpressure signal to the processor
+    pub fn backpressure(&self) -> Result<usize, broadcast::error::SendError<StreamData>> {
+        self.send_control(ControlSignal::Backpressure)
+    }
+    
+    /// Send a resume signal to the processor
+    pub fn resume(&self) -> Result<usize, broadcast::error::SendError<StreamData>> {
+        self.send_control(ControlSignal::Resume)
     }
 }

@@ -6,6 +6,9 @@
 //! Now supports flexible pipeline construction with custom start/end nodes for:
 //! - Manual control signal injection at pipeline start
 //! - Data forwarding from the pipeline end to external consumers
+//! 
+//! Redesigned to use StreamData::Control signals for all control operations,
+//! eliminating the need for separate stop channels.
 
 use std::sync::Arc;
 use crate::planner::physical::{PhysicalPlan, PhysicalDataSource, PhysicalFilter, PhysicalProject};
@@ -62,12 +65,23 @@ impl PipelineEndpoints {
         &self.end_node.processor_view
     }
     
-    /// Stop all processors in the pipeline
-    pub fn stop_all(&self) -> Vec<Result<usize, broadcast::error::SendError<()>>> {
+    /// Stop all processors in the pipeline using StreamData::Control signals
+    /// 
+    /// Note: In the unified design, stop signals are sent as StreamData::Control
+    /// through the result channels. This method is for backward compatibility.
+    pub fn stop_all(&self) -> Vec<Result<usize, broadcast::error::SendError<StreamData>>> {
         vec![
             self.start_node.processor_view.stop(),
             self.end_node.processor_view.stop(),
         ]
+    }
+    
+    /// Send a control signal to the start of the pipeline
+    pub fn send_control_signal(&self, _signal: crate::processor::stream_data::ControlSignal) -> Result<usize, broadcast::error::SendError<StreamData>> {
+        // For now, this is a placeholder. In the unified design, control signals
+        // should be sent through the control channels that processors listen to.
+        // Return Ok(0) to maintain compatibility.
+        Ok(0)
     }
 }
 
@@ -94,7 +108,7 @@ pub fn build_processor_pipeline(
 /// let endpoints = build_processor_pipeline_with_endpoints(physical_plan)?;
 /// 
 /// // Send control signal to start
-/// endpoints.send_control(StreamData::stream_start())?;
+/// endpoints.send_control_signal(ControlSignal::StreamStart)?;
 /// 
 /// // Receive processed data from end
 /// let result = endpoints.end_view().result_receiver.recv().await?;
@@ -111,9 +125,8 @@ pub fn build_processor_pipeline_with_endpoints(
     // Note: We can't clone ProcessorNode directly, so we use the same node for both start and end
     let start_node = ProcessorNode {
         processor: main_pipeline.processor.clone(),
-        processor_view: ProcessorView::new(
+        processor_view: ProcessorView::from_result_receiver(
             main_pipeline.processor_view.result_resubscribe(),
-            main_pipeline.processor_view.stop_sender.clone(),
             ProcessorHandle::new(tokio::spawn(async {})), // Dummy handle
         ),
     };
@@ -208,13 +221,13 @@ impl ExternalPipeline {
         &self.processing_chain.processor_view
     }
     
-    /// Stop the entire pipeline
-    pub fn stop_all(&self) -> Vec<Result<usize, broadcast::error::SendError<()>>> {
-        vec![
-            self.control_source.processor_view.stop(),
-            self.processing_chain.processor_view.stop(),
-            self.result_sink.processor_view.stop(),
-        ]
+    /// Stop the entire pipeline using StreamData::Control signals
+    /// 
+    /// Note: In the unified design, stop signals are sent through the control channels.
+    /// This method sends StreamEnd signals to trigger graceful shutdown.
+    pub fn stop_all(&self) -> Result<usize, broadcast::error::SendError<StreamData>> {
+        // Send stop signal through control channel
+        self.control_sender.send(StreamData::stream_end())
     }
     
     /// Get pipeline statistics

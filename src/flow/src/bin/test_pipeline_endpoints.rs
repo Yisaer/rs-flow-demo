@@ -59,7 +59,10 @@ async fn test_external_io_pipeline() {
     
     // Stop the pipeline
     let stop_result = external_pipeline.stop_all();
-    println!("✓ Pipeline stopped: {:?}", stop_result);
+    match stop_result {
+        Ok(_) => println!("✓ Pipeline stopped successfully"),
+        Err(e) => println!("Pipeline stop error: {}", e),
+    }
     
     println!("✅ External I/O test completed\n");
 }

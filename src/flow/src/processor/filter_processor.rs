@@ -4,6 +4,7 @@
 //! Currently just passes data through for pipeline establishment.
 //! 
 //! Design follows rstream's Executor pattern with tokio::spawn and dedicated filtering routine.
+//! Now uses StreamData::Control signals for shutdown, eliminating separate stop channels.
 
 use tokio::sync::broadcast;
 use std::sync::Arc;
@@ -47,18 +48,17 @@ impl FilterProcessor {
 
 impl StreamProcessor for FilterProcessor {
     fn start(&self) -> ProcessorView {
-        // Create channels using utils
+        // Create only result channel - no stop channel needed
         let (result_tx, result_rx) = utils::create_result_channel(self.downstream_count);
-        let (stop_tx, stop_rx) = utils::create_stop_channel();
         
         // Spawn the filter routine - currently just passes data through
-        let routine = self.create_filter_routine(result_tx, stop_rx);
+        let routine = self.create_filter_routine(result_tx);
         
         let join_handle = tokio::spawn(routine);
         
-        ProcessorView::new(
+        // For FilterProcessor, we don't need control sender - it processes data from upstream
+        ProcessorView::from_result_receiver(
             result_rx,
-            stop_tx,
             ProcessorHandle::new(join_handle),
         )
     }
@@ -80,7 +80,6 @@ impl FilterProcessor {
     fn create_filter_routine(
         &self,
         result_tx: broadcast::Sender<StreamData>,
-        mut stop_rx: broadcast::Receiver<()>,
     ) -> impl std::future::Future<Output = ()> + Send + 'static {
         let mut input_receivers = self.input_receivers();
         let downstream_count = self.downstream_count;
@@ -98,71 +97,69 @@ impl FilterProcessor {
             // Process incoming data (currently just passes through)
             // TODO: Implement actual filtering logic
             loop {
-                tokio::select! {
-                    // Check stop signal
-                    _ = stop_rx.recv() => {
-                        println!("FilterProcessor: Received stop signal, shutting down");
-                        break;
+                // Process from first input channel (simplified for now)
+                // In a real implementation, would need to handle multiple inputs properly
+                let result = async {
+                    if let Some(receiver) = input_receivers.get_mut(0) {
+                        receiver.recv().await
+                    } else {
+                        // No input receivers, this might be an error case
+                        // For now, just wait indefinitely - in reality this should probably end the processor
+                        futures::future::pending::<Result<StreamData, broadcast::error::RecvError>>().await
                     }
-                    
-                    // Process from first input channel (simplified for now)
-                    // In a real implementation, would need to handle multiple inputs properly
-                    result = async {
-                        if let Some(receiver) = input_receivers.get_mut(0) {
-                            receiver.recv().await
-                        } else {
-                            // No input receivers, this might be an error case
-                            // For now, just wait indefinitely - in reality this should probably end the processor
-                            futures::future::pending::<Result<StreamData, broadcast::error::RecvError>>().await
+                };
+                
+                match result.await {
+                    Ok(stream_data) => {
+                        // Check for stop signal in the data stream
+                        if utils::is_stop_signal(&stream_data) {
+                            println!("FilterProcessor: Received stop signal in data stream, shutting down");
+                            break;
                         }
-                    } => {
-                        match result {
-                            Ok(stream_data) => {
-                                // Apply filter logic with error handling
-                                if stream_data.is_data() {
-                                    if let Some(collection) = stream_data.as_collection() {
-                                        match Self::static_should_include_static(collection) {
-                                            Ok(should_include) => {
-                                                if should_include {
-                                                    // Data passes filter, send it downstream
-                                                    if result_tx.send(stream_data).is_err() {
-                                                        println!("FilterProcessor: All downstream receivers dropped, stopping");
-                                                        break;
-                                                    }
-                                                } else {
-                                                    println!("FilterProcessor: Data filtered out");
-                                                }
+                        
+                        // Apply filter logic with error handling
+                        if stream_data.is_data() {
+                            if let Some(collection) = stream_data.as_collection() {
+                                match Self::static_should_include_static(collection) {
+                                    Ok(should_include) => {
+                                        if should_include {
+                                            // Data passes filter, send it downstream
+                                            if result_tx.send(stream_data).is_err() {
+                                                println!("FilterProcessor: All downstream receivers dropped, stopping");
+                                                break;
                                             }
-                                            Err(filter_error) => {
-                                                // Filter processing error - send as StreamData::Error instead of stopping
-                                                println!("FilterProcessor: Error during filtering: {}", filter_error);
-                                                let stream_error = StreamError::new(filter_error)
-                                                    .with_source(&processor_name)
-                                                    .with_timestamp(std::time::SystemTime::now());
-                                                
-                                                if result_tx.send(StreamData::error(stream_error)).is_err() {
-                                                    println!("FilterProcessor: All downstream receivers dropped, stopping");
-                                                    break;
-                                                }
-                                            }
+                                        } else {
+                                            println!("FilterProcessor: Data filtered out");
                                         }
                                     }
-                                } else {
-                                    // Pass through control signals and errors
-                                    if result_tx.send(stream_data).is_err() {
-                                        println!("FilterProcessor: All downstream receivers dropped, stopping");
-                                        break;
+                                    Err(filter_error) => {
+                                        // Filter processing error - send as StreamData::Error instead of stopping
+                                        println!("FilterProcessor: Error during filtering: {}", filter_error);
+                                        let stream_error = StreamError::new(filter_error)
+                                            .with_source(&processor_name)
+                                            .with_timestamp(std::time::SystemTime::now());
+                                        
+                                        if result_tx.send(StreamData::error(stream_error)).is_err() {
+                                            println!("FilterProcessor: All downstream receivers dropped, stopping");
+                                            break;
+                                        }
                                     }
                                 }
                             }
-                            Err(e) => {
-                                // Handle broadcast errors
-                                let error_data = utils::handle_receive_error(e);
-                                if result_tx.send(error_data).is_err() {
-                                    println!("FilterProcessor: All downstream receivers dropped, stopping");
-                                    break;
-                                }
+                        } else {
+                            // Pass through control signals and errors
+                            if result_tx.send(stream_data).is_err() {
+                                println!("FilterProcessor: All downstream receivers dropped, stopping");
+                                break;
                             }
+                        }
+                    }
+                    Err(e) => {
+                        // Handle broadcast errors
+                        let error_data = utils::handle_receive_error(e);
+                        if result_tx.send(error_data).is_err() {
+                            println!("FilterProcessor: All downstream receivers dropped, stopping");
+                            break;
                         }
                     }
                 }
