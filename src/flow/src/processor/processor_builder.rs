@@ -164,7 +164,6 @@ pub fn create_processor_from_plan_node(
         let processor_id = ds.source_name();
         let processor = DataSourceProcessor::new(
             processor_id,
-            Arc::new(ds.clone()),
         );
         Ok(PlanProcessor::DataSource(processor))
     } else if let Some(proj) = plan.as_any().downcast_ref::<PhysicalProject>() {

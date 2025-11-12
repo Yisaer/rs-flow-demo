@@ -15,7 +15,7 @@ async fn test_create_processor_pipeline_with_datasource() {
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    let control_signal = StreamData::control(ControlSignal::StreamStart);
+    let control_signal = StreamData::control(ControlSignal::Resume);
     pipeline
         .input
         .send(control_signal.clone())
@@ -33,7 +33,7 @@ async fn test_create_processor_pipeline_with_datasource() {
     );
     assert_eq!(
         received_signal.as_control(),
-        Some(&ControlSignal::StreamStart),
+        Some(&ControlSignal::Resume),
         "should receive the same control signal"
     );
 
