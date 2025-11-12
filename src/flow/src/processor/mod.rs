@@ -11,6 +11,7 @@ pub mod stream_data;
 pub mod base;
 pub mod control_source_processor;
 pub mod datasource_processor;
+pub mod project_processor;
 pub mod result_sink_processor;
 pub mod processor_builder;
 
@@ -18,11 +19,9 @@ pub use stream_data::{StreamData, StreamError, ControlSignal};
 pub use base::{Processor, ProcessorError};
 pub use control_source_processor::ControlSourceProcessor;
 pub use datasource_processor::DataSourceProcessor;
+pub use project_processor::ProjectProcessor;
 pub use result_sink_processor::ResultSinkProcessor;
 pub use processor_builder::{
-    connect_control_source_to_leaf_nodes, 
-    find_leaf_nodes, 
-    create_processor_from_physical_plan,
     create_processor_pipeline,
     ProcessorPipeline,
 };

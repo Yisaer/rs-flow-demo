@@ -1,3 +1,4 @@
+
 //! Processor builder - creates and connects processors from PhysicalPlan
 //!
 //! This module provides utilities to build processor pipelines from PhysicalPlan,
@@ -8,21 +9,19 @@ use tokio::task::JoinHandle;
 use std::sync::Arc;
 use crate::processor::{
     Processor, ProcessorError, 
-    ControlSourceProcessor, DataSourceProcessor, ResultSinkProcessor, StreamData,
+    ControlSourceProcessor, DataSourceProcessor, ProjectProcessor, ResultSinkProcessor, StreamData,
 };
-use crate::planner::physical::{PhysicalPlan, PhysicalDataSource};
+use crate::planner::physical::{PhysicalPlan, PhysicalDataSource, PhysicalProject};
 
 /// Enum for all processor types created from PhysicalPlan
 ///
 /// This enum allows storing different types of processors in a unified way.
-/// Currently only DataSourceProcessor is implemented, but more types can be added.
+/// Currently supports DataSourceProcessor and ProjectProcessor.
 pub enum PlanProcessor {
     /// DataSourceProcessor created from PhysicalDatasource
     DataSource(DataSourceProcessor),
-    // Future processor types can be added here:
-    // Filter(FilterProcessor),
-    // Project(ProjectProcessor),
-    // etc.
+    /// ProjectProcessor created from PhysicalProject
+    Project(ProjectProcessor),
 }
 
 impl PlanProcessor {
@@ -30,6 +29,7 @@ impl PlanProcessor {
     pub fn id(&self) -> &str {
         match self {
             PlanProcessor::DataSource(p) => p.id(),
+            PlanProcessor::Project(p) => p.id(),
         }
     }
     
@@ -37,6 +37,7 @@ impl PlanProcessor {
     pub fn start(&mut self) -> tokio::task::JoinHandle<Result<(), ProcessorError>> {
         match self {
             PlanProcessor::DataSource(p) => p.start(),
+            PlanProcessor::Project(p) => p.start(),
         }
     }
     
@@ -44,6 +45,7 @@ impl PlanProcessor {
     pub fn output_senders(&self) -> Vec<mpsc::Sender<crate::processor::StreamData>> {
         match self {
             PlanProcessor::DataSource(p) => p.output_senders(),
+            PlanProcessor::Project(p) => p.output_senders(),
         }
     }
     
@@ -51,6 +53,7 @@ impl PlanProcessor {
     pub fn add_input(&mut self, receiver: mpsc::Receiver<crate::processor::StreamData>) {
         match self {
             PlanProcessor::DataSource(p) => p.add_input(receiver),
+            PlanProcessor::Project(p) => p.add_input(receiver),
         }
     }
     
@@ -58,6 +61,7 @@ impl PlanProcessor {
     pub fn add_output(&mut self, sender: mpsc::Sender<crate::processor::StreamData>) {
         match self {
             PlanProcessor::DataSource(p) => p.add_output(sender),
+            PlanProcessor::Project(p) => p.add_output(sender),
         }
     }
 }
@@ -119,70 +123,26 @@ impl ProcessorPipeline {
 
         Ok(())
     }
-}
 
-/// Connect ControlSourceProcessor outputs to all leaf nodes in PhysicalPlan
-///
-/// Leaf nodes are PhysicalPlan nodes that have no children.
-/// Currently, only PhysicalDatasource is supported as a leaf node.
-///
-/// # Arguments
-/// * `control_source` - The ControlSourceProcessor whose outputs will be connected
-/// * `physical_plan` - The PhysicalPlan to traverse and find leaf nodes
-///
-/// # Returns
-/// A vector of DataSourceProcessor created from leaf nodes, with their inputs connected to control_source outputs
-pub fn connect_control_source_to_leaf_nodes(
-    control_source: &mut ControlSourceProcessor,
-    physical_plan: Arc<dyn PhysicalPlan>,
-) -> Result<Vec<DataSourceProcessor>, ProcessorError> {
-    let mut processors = Vec::new();
-    let leaf_nodes = find_leaf_nodes(physical_plan);
-    
-    for (idx, leaf) in leaf_nodes.iter().enumerate() {
-        // Create processor from leaf node
-        if let Some(ds) = leaf.as_any().downcast_ref::<PhysicalDataSource>() {
-            let processor_id = format!("datasource_{}", idx);
-            let mut datasource_processor = DataSourceProcessor::new(
-                processor_id.clone(),
-                Arc::new(ds.clone()),
-            );
-            
-            // Create channel to connect control_source output to datasource_processor input
-            let (sender, receiver) = mpsc::channel(100);
-            control_source.add_output(sender);
-            datasource_processor.add_input(receiver);
-            
-            processors.push(datasource_processor);
-        } else {
-            return Err(ProcessorError::InvalidConfiguration(format!(
-                "Unsupported leaf node type: {}",
-                leaf.get_plan_type()
-            )));
-        }
+    /// Send StreamData to a specific downstream processor by id
+    ///
+    /// This method directly delegates to ControlSourceProcessor's send_stream_data method,
+    /// providing a convenient interface for sending data to specific processors in the pipeline.
+    ///
+    /// # Arguments
+    /// * `processor_id` - The ID of the target processor
+    /// * `data` - The StreamData to send
+    ///
+    /// # Returns
+    /// * `Ok(())` if the data was sent successfully
+    /// * `Err(ProcessorError)` if the processor was not found or channel error occurred
+    pub async fn send_stream_data(
+        &self,
+        processor_id: &str,
+        data: StreamData,
+    ) -> Result<(), ProcessorError> {
+        self.control_source.send_stream_data(processor_id, data).await
     }
-    
-    Ok(processors)
-}
-
-/// Find all leaf nodes (nodes without children) in a PhysicalPlan
-///
-/// This function recursively traverses the PhysicalPlan tree and collects
-/// all nodes that have no children.
-pub fn find_leaf_nodes(plan: Arc<dyn PhysicalPlan>) -> Vec<Arc<dyn PhysicalPlan>> {
-    let mut leaf_nodes = Vec::new();
-    
-    if plan.children().is_empty() {
-        // This is a leaf node
-        leaf_nodes.push(plan);
-    } else {
-        // Recursively find leaf nodes in children
-        for child in plan.children() {
-            leaf_nodes.extend(find_leaf_nodes(Arc::clone(child)));
-        }
-    }
-    
-    leaf_nodes
 }
 
 /// Create a processor from a PhysicalPlan node
@@ -198,35 +158,28 @@ pub fn find_leaf_nodes(plan: Arc<dyn PhysicalPlan>) -> Vec<Arc<dyn PhysicalPlan>
 /// A PlanProcessor enum variant corresponding to the plan type
 pub fn create_processor_from_plan_node(
     plan: &Arc<dyn PhysicalPlan>,
-    idx: usize,
+    _idx: usize,
 ) -> Result<PlanProcessor, ProcessorError> {
     if let Some(ds) = plan.as_any().downcast_ref::<PhysicalDataSource>() {
-        let processor_id = format!("datasource_{}", idx);
+        let processor_id = ds.source_name();
         let processor = DataSourceProcessor::new(
             processor_id,
             Arc::new(ds.clone()),
         );
         Ok(PlanProcessor::DataSource(processor))
+    } else if let Some(proj) = plan.as_any().downcast_ref::<PhysicalProject>() {
+        let processor_id = format!("project_{}", _idx);
+        let processor = ProjectProcessor::new(
+            processor_id,
+            Arc::new(proj.clone()),
+        );
+        Ok(PlanProcessor::Project(processor))
     } else {
         Err(ProcessorError::InvalidConfiguration(format!(
             "Unsupported PhysicalPlan type: {}",
             plan.get_plan_type()
         )))
     }
-}
-
-/// Create a DataSourceProcessor from a PhysicalPlan if it's a PhysicalDatasource
-///
-/// This is a convenience function for creating DataSourceProcessor specifically.
-/// For general use, prefer `create_processor_from_plan_node`.
-pub fn create_processor_from_physical_plan(
-    id: impl Into<String>,
-    plan: Arc<dyn PhysicalPlan>,
-) -> Option<DataSourceProcessor> {
-    plan.as_any().downcast_ref::<PhysicalDataSource>().map(|ds| DataSourceProcessor::new(
-        id,
-        Arc::new(ds.clone()),
-    ))
 }
 
 /// Internal structure to track processors created from PhysicalPlan nodes
@@ -327,8 +280,9 @@ fn connect_processors(
     let leaf_indices = collect_leaf_indices(Arc::clone(&physical_plan));
     for leaf_index in leaf_indices {
         if let Some(processor) = processor_map.get_processor_mut(leaf_index) {
+            let processor_id = processor.id().to_string();
             let (sender, receiver) = mpsc::channel(100);
-            control_source.add_output(sender);
+            control_source.add_output_for_processor(processor_id, sender);
             processor.add_input(receiver);
         }
     }
@@ -406,4 +360,51 @@ pub fn create_processor_pipeline(
         result_sink,
         handles: Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use crate::planner::physical::{PhysicalProject, PhysicalProjectField, PhysicalDataSource};
+    use sqlparser::ast::{Expr, Value as SqlValue};
+    use crate::expr::ScalarExpr;
+    use datatypes::{Value, ConcreteDatatype};
+
+    #[test]
+    fn test_create_processor_from_physical_project() {
+        // Create a simple data source
+        let data_source: Arc<dyn crate::planner::physical::PhysicalPlan> =
+            Arc::new(PhysicalDataSource::new("test_source".to_string(), 0));
+
+        // Create a projection field
+        let project_field = PhysicalProjectField::new(
+            "projected_field".to_string(),
+            Expr::Value(SqlValue::Number("42".to_string(), false)),
+            ScalarExpr::Literal(Value::Int64(42), ConcreteDatatype::Int64(datatypes::Int64Type)),
+        );
+
+        // Create a PhysicalProject
+        let physical_project: Arc<dyn crate::planner::physical::PhysicalPlan> =
+            Arc::new(PhysicalProject::with_single_child(
+                vec![project_field],
+                data_source,
+                1,
+            ));
+
+        // Try to create a processor from the PhysicalProject
+        let result = create_processor_from_plan_node(&physical_project, 0);
+        
+        assert!(result.is_ok(), "Should successfully create processor from PhysicalProject");
+        
+        match result {
+            Ok(processor) => {
+                assert_eq!(processor.id(), "project_0");
+                println!("✅ SUCCESS: PhysicalProject processor created with ID: {}", processor.id());
+            }
+            Err(e) => {
+                panic!("Failed to create PhysicalProject processor: {}", e);
+            }
+        }
+    }
 }
