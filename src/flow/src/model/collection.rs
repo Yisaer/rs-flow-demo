@@ -19,6 +19,9 @@ pub trait Collection: Send + Sync + Any {
     /// Get a column by source name and column name
     fn column_by_name(&self, source_name: &str, name: &str) -> Option<&Column>;
 
+    /// Get a column by column name only (ignores source name)
+    fn column_by_column_name(&self, name: &str) -> Option<&Column>;
+
     /// Check if the collection is empty
     fn is_empty(&self) -> bool {
         self.num_rows() == 0

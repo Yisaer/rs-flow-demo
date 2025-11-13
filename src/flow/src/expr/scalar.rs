@@ -90,7 +90,7 @@ impl ScalarExpr {
                 column_name,
             } => collection
                 .column_by_name(source_name, column_name)
-                .or_else(|| collection.column_by_name("", column_name))
+                .or_else(|| collection.column_by_column_name(column_name))
                 .map(|col| col.values().to_vec())
                 .ok_or_else(|| EvalError::ColumnNotFound {
                     source: source_name.clone(),

@@ -1,12 +1,13 @@
-//! Source connector abstractions for ingesting external streams.
+//! Connector abstractions for interacting with external systems.
 //!
-//! Connectors expose their payloads as asynchronous streams of bytes.
-//! `DataSourceProcessor` (and other processors) can treat those streams as
-//! just another input without blocking on any single source.
+//! - Source connectors ingest bytes and expose them as async streams.
+//! - Sink connectors consume encoded payloads and push them outward.
 
 use futures::stream::Stream;
 use std::pin::Pin;
 
+pub mod mqtt_client;
+pub mod sink;
 pub mod source;
 
 /// Convenience alias for boxed connector streams.
@@ -31,11 +32,20 @@ pub trait SourceConnector: Send + Sync + 'static {
 }
 
 /// Error type shared by connectors.
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum ConnectorError {
     /// Connector has already been subscribed.
     #[error("connector already subscribed: {0}")]
     AlreadySubscribed(String),
+    /// Connector client already exists in the shared manager.
+    #[error("connector client already exists: {0}")]
+    AlreadyExists(String),
+    /// Connector client not found in the shared manager.
+    #[error("connector client not found: {0}")]
+    NotFound(String),
+    /// Connector client cannot be dropped because it is still in use.
+    #[error("connector client in use: {0}")]
+    ResourceBusy(String),
     /// Connection-level failure.
     #[error("connection error: {0}")]
     Connection(String),
@@ -44,6 +54,12 @@ pub enum ConnectorError {
     Other(String),
 }
 
+pub use mqtt_client::{
+    acquire_shared_client, create_shared_client, drop_shared_client, SharedMqttClientConfig,
+};
+pub use sink::mock::{MockSinkConnector, MockSinkHandle};
+pub use sink::mqtt::{MqttSinkConfig, MqttSinkConnector};
+pub use sink::{SinkConnector, SinkConnectorError};
 pub use source::mock::{MockSourceConnector, MockSourceError, MockSourceHandle};
 /// MQTT-specific helpers and connector implementation.
 pub use source::mqtt::{MqttSourceConfig, MqttSourceConnector};
