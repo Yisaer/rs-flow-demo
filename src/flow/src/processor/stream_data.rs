@@ -7,14 +7,10 @@ use crate::model::Collection;
 /// Control signals for stream processing
 #[derive(Debug, Clone, PartialEq)]
 pub enum ControlSignal {
-    /// Stream start signal
-    StreamStart,
     /// Stream end signal  
     StreamEnd,
     /// Watermark for time-based processing
     Watermark(std::time::SystemTime),
-    /// Backpressure signal - slow down
-    Backpressure,
     /// Resume normal processing
     Resume,
     /// Flush buffered data
@@ -160,19 +156,9 @@ impl StreamData {
 
 /// Convenience methods for common control signals
 impl StreamData {
-    /// Create stream start signal
-    pub fn stream_start() -> Self {
-        StreamData::control(ControlSignal::StreamStart)
-    }
-    
     /// Create stream end signal
     pub fn stream_end() -> Self {
         StreamData::control(ControlSignal::StreamEnd)
-    }
-    
-    /// Create backpressure signal
-    pub fn backpressure() -> Self {
-        StreamData::control(ControlSignal::Backpressure)
     }
     
     /// Create resume signal

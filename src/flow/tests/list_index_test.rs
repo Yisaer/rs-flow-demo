@@ -12,9 +12,6 @@ use std::sync::Arc;
 /// Expected result: 10
 #[test]
 fn test_list_index_simple() {
-    // Create list type: List<Int32>
-    let list_type = ListType::new(Arc::new(ConcreteDatatype::Int32(Int32Type)));
-
     // Create list value: [10, 20, 30]
     let list_value = Value::List(ListValue::new(
         vec![
@@ -25,14 +22,9 @@ fn test_list_index_simple() {
         Arc::new(ConcreteDatatype::Int32(Int32Type)),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("list_col".to_string(), "test_table".to_string(), ConcreteDatatype::List(list_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
     let column = Column::new(
-        "list_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(), "list_col".to_string(),
         vec![list_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -59,9 +51,6 @@ fn test_list_index_simple() {
 /// Expected result: 20
 #[test]
 fn test_list_index_middle() {
-    // Create list type: List<Int32>
-    let list_type = ListType::new(Arc::new(ConcreteDatatype::Int32(Int32Type)));
-
     // Create list value: [10, 20, 30]
     let list_value = Value::List(ListValue::new(
         vec![
@@ -72,14 +61,9 @@ fn test_list_index_middle() {
         Arc::new(ConcreteDatatype::Int32(Int32Type)),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("list_col".to_string(), "test_table".to_string(), ConcreteDatatype::List(list_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
     let column = Column::new(
-        "list_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(), "list_col".to_string(),
         vec![list_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -106,9 +90,6 @@ fn test_list_index_middle() {
 /// Expected result: 30
 #[test]
 fn test_list_index_last() {
-    // Create list type: List<Int32>
-    let list_type = ListType::new(Arc::new(ConcreteDatatype::Int32(Int32Type)));
-
     // Create list value: [10, 20, 30]
     let list_value = Value::List(ListValue::new(
         vec![
@@ -119,14 +100,9 @@ fn test_list_index_last() {
         Arc::new(ConcreteDatatype::Int32(Int32Type)),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("list_col".to_string(), "test_table".to_string(), ConcreteDatatype::List(list_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
     let column = Column::new(
-        "list_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(),"list_col".to_string(),
         vec![list_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -153,8 +129,6 @@ fn test_list_index_last() {
 /// Expected result: "world"
 #[test]
 fn test_list_index_string_list() {
-    // Create list type: List<String>
-    let list_type = ListType::new(Arc::new(ConcreteDatatype::String(StringType)));
 
     // Create list value: ["hello", "world"]
     let list_value = Value::List(ListValue::new(
@@ -165,14 +139,9 @@ fn test_list_index_string_list() {
         Arc::new(ConcreteDatatype::String(StringType)),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("list_col".to_string(), "test_table".to_string(), ConcreteDatatype::List(list_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
     let column = Column::new(
-        "list_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(), "list_col".to_string(),
         vec![list_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -199,8 +168,6 @@ fn test_list_index_string_list() {
 /// Expected result: ListIndexOutOfBounds error
 #[test]
 fn test_list_index_out_of_bounds() {
-    // Create list type: List<Int32>
-    let list_type = ListType::new(Arc::new(ConcreteDatatype::Int32(Int32Type)));
 
     // Create list value: [10, 20, 30]
     let list_value = Value::List(ListValue::new(
@@ -212,14 +179,9 @@ fn test_list_index_out_of_bounds() {
         Arc::new(ConcreteDatatype::Int32(Int32Type)),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("list_col".to_string(), "test_table".to_string(), ConcreteDatatype::List(list_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
     let column = Column::new(
-        "list_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(), "list_col".to_string(),
         vec![list_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -247,8 +209,6 @@ fn test_list_index_out_of_bounds() {
 /// Expected result: ListIndexOutOfBounds error
 #[test]
 fn test_list_index_negative_index() {
-    // Create list type: List<Int32>
-    let list_type = ListType::new(Arc::new(ConcreteDatatype::Int32(Int32Type)));
 
     // Create list value: [10, 20, 30]
     let list_value = Value::List(ListValue::new(
@@ -260,14 +220,9 @@ fn test_list_index_negative_index() {
         Arc::new(ConcreteDatatype::Int32(Int32Type)),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("list_col".to_string(), "test_table".to_string(), ConcreteDatatype::List(list_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
     let column = Column::new(
-        "list_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(),"list_col".to_string(),
         vec![list_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -295,14 +250,10 @@ fn test_list_index_negative_index() {
 /// Expected result: TypeMismatch error
 #[test]
 fn test_list_index_not_list() {
-    // Create schema for the tuple with Int32 value
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("int_col".to_string(), "test_table".to_string(), ConcreteDatatype::Int32(Int32Type)),
-    ]);
 
     // Create a single-row collection for vectorized testing
     let column = Column::new(
-        "int_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(),"int_col".to_string(),
         vec![Value::Int32(42)]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -330,8 +281,6 @@ fn test_list_index_not_list() {
 /// Expected result: InvalidIndexType error
 #[test]
 fn test_list_index_invalid_index_type() {
-    // Create list type: List<Int32>
-    let list_type = ListType::new(Arc::new(ConcreteDatatype::Int32(Int32Type)));
 
     // Create list value: [10, 20, 30]
     let list_value = Value::List(ListValue::new(
@@ -343,14 +292,9 @@ fn test_list_index_invalid_index_type() {
         Arc::new(ConcreteDatatype::Int32(Int32Type)),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("list_col".to_string(), "test_table".to_string(), ConcreteDatatype::List(list_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
     let column = Column::new(
-        "list_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(), "list_col".to_string(),
         vec![list_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -378,8 +322,6 @@ fn test_list_index_invalid_index_type() {
 /// Expected result: 40
 #[test]
 fn test_list_index_dynamic_index() {
-    // Create list type: List<Int32>
-    let list_type = ListType::new(Arc::new(ConcreteDatatype::Int32(Int32Type)));
 
     // Create list value: [10, 20, 30, 40, 50]
     let list_value = Value::List(ListValue::new(
@@ -393,19 +335,13 @@ fn test_list_index_dynamic_index() {
         Arc::new(ConcreteDatatype::Int32(Int32Type)),
     ));
 
-    // Create schema for the tuple with both list and index
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("list_col".to_string(), "test_table".to_string(), ConcreteDatatype::List(list_type.clone())),
-        ColumnSchema::new("index_col".to_string(), "test_table".to_string(), ConcreteDatatype::Int64(datatypes::Int64Type)),
-    ]);
-
     // Create a single-row collection for vectorized testing with both list and index columns
     let list_column = Column::new(
-        "list_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(),"list_col".to_string(),
         vec![list_value]
     );
     let index_column = Column::new(
-        "index_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(),  "index_col".to_string(),
         vec![Value::Int64(3)]
     );
     let collection = RecordBatch::new( vec![list_column, index_column]).unwrap();

@@ -6,8 +6,8 @@ use datatypes::{ColumnSchema, ConcreteDatatype, Int64Type, StringType};
 fn test_column_schema_basic() {
     // Test basic ColumnSchema with all required parameters
     let column = ColumnSchema::new(
-        "id".to_string(), 
         "users".to_string(),
+        "id".to_string(),
         ConcreteDatatype::Int64(Int64Type)
     );
     
@@ -21,20 +21,20 @@ fn test_column_schema_basic() {
 fn test_column_schema_different_sources() {
     // Test multiple columns from different tables
     let user_id = ColumnSchema::new(
-        "id".to_string(), 
         "users".to_string(),
+        "id".to_string(),
         ConcreteDatatype::Int64(Int64Type)
     );
     
     let user_name = ColumnSchema::new(
-        "name".to_string(), 
         "users".to_string(),
+        "name".to_string(),
         ConcreteDatatype::String(StringType)
     );
     
     let order_id = ColumnSchema::new(
-        "id".to_string(), 
         "orders".to_string(),
+        "id".to_string(),
         ConcreteDatatype::Int64(Int64Type)
     );
     
@@ -51,14 +51,14 @@ fn test_column_schema_different_sources() {
 fn test_column_schema_comparison() {
     // Test that columns with same name but different sources are different
     let user_id = ColumnSchema::new(
-        "id".to_string(), 
         "users".to_string(),
+        "id".to_string(),
         ConcreteDatatype::Int64(Int64Type)
     );
     
     let order_id = ColumnSchema::new(
-        "id".to_string(), 
         "orders".to_string(),
+        "id".to_string(),
         ConcreteDatatype::Int64(Int64Type)
     );
     
@@ -72,8 +72,8 @@ fn test_column_schema_comparison() {
 fn test_source_name_access() {
     // Test that source_name is always accessible
     let column = ColumnSchema::new(
+        "my_table".to_string(),
         "test".to_string(),
-        "my_table".to_string(), 
         ConcreteDatatype::Int64(Int64Type)
     );
     
@@ -86,8 +86,8 @@ fn test_source_name_access() {
 fn test_belongs_to_functionality() {
     // Test the belongs_to method thoroughly
     let column = ColumnSchema::new(
-        "user_id".to_string(),
         "users".to_string(),
+        "user_id".to_string(),
         ConcreteDatatype::Int64(Int64Type)
     );
     

@@ -82,14 +82,6 @@ impl Processor for ProjectProcessor {
                             // Handle control signals
                             if let Some(control) = data.as_control() {
                                 match control {
-                                    crate::processor::ControlSignal::StreamStart => {
-                                        // Forward StreamStart to outputs
-                                        for output in &outputs {
-                                            if output.send(data.clone()).await.is_err() {
-                                                return Err(ProcessorError::ChannelClosed);
-                                            }
-                                        }
-                                    }
                                     crate::processor::ControlSignal::StreamEnd => {
                                         // Forward StreamEnd to outputs
                                         for output in &outputs {

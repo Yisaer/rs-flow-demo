@@ -40,14 +40,9 @@ fn test_struct_field_then_list_index() {
         struct_type.clone(),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("struct_col".to_string(), "test_table".to_string(), ConcreteDatatype::Struct(struct_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
     let column = Column::new(
-        "struct_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(),"struct_col".to_string(),
         vec![struct_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -117,14 +112,9 @@ fn test_list_index_then_struct_field() {
         Arc::new(ConcreteDatatype::Struct(struct_type)),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("list_col".to_string(), "test_table".to_string(), ConcreteDatatype::List(list_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
     let column = Column::new(
-        "list_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(),"list_col".to_string(),
         vec![list_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -201,14 +191,9 @@ fn test_complex_nested_access() {
         outer_struct_type.clone(),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("complex_col".to_string(), "test_table".to_string(), ConcreteDatatype::Struct(outer_struct_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
     let column = Column::new(
-        "complex_col".to_string(), "test_table".to_string(),
+        "test_table".to_string(),"complex_col".to_string(),
         vec![outer_struct_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();
@@ -266,14 +251,9 @@ fn test_list_of_lists() {
         Arc::new(ConcreteDatatype::List(inner_list_type)),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("list_of_lists".to_string(), "test_table".to_string(), ConcreteDatatype::List(outer_list_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
     let column = Column::new(
-        "list_of_lists".to_string(), "test_table".to_string(),
+        "test_table".to_string(),"list_of_lists".to_string(),
         vec![outer_list_value]
     );
     let collection = RecordBatch::new( vec![column]).unwrap();

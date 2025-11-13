@@ -1,47 +1,71 @@
-//! DataSourceProcessor - processes data from PhysicalDatasource
+//! FilterProcessor - processes filter operations
 //!
-//! This processor reads data from a PhysicalDatasource and sends it downstream
-//! as StreamData::Collection.
+//! This processor evaluates filter expressions and produces output with filtered records.
 
 use tokio::sync::mpsc;
+use std::sync::Arc;
 use crate::processor::{Processor, ProcessorError, StreamData};
+use crate::planner::physical::PhysicalFilter;
+use crate::model::Collection;
 
-/// DataSourceProcessor - reads data from PhysicalDatasource
+/// FilterProcessor - evaluates filter expressions
 ///
 /// This processor:
-/// - Takes a PhysicalDatasource as input
-/// - Reads data from the source when triggered by control signals
-/// - Sends data downstream as StreamData::Collection
-pub struct DataSourceProcessor {
+/// - Takes input data (Collection) and filter expressions
+/// - Evaluates the expressions to filter records
+/// - Sends the filtered data downstream as StreamData::Collection
+pub struct FilterProcessor {
     /// Processor identifier
-    source_name: String,
-    /// Input channels for receiving control signals
+    id: String,
+    /// Physical filter configuration
+    physical_filter: Arc<PhysicalFilter>,
+    /// Input channels for receiving data
     inputs: Vec<mpsc::Receiver<StreamData>>,
     /// Output channels for sending data downstream
     outputs: Vec<mpsc::Sender<StreamData>>,
 }
 
-impl DataSourceProcessor {
-    /// Create a new DataSourceProcessor from PhysicalDatasource
+impl FilterProcessor {
+    /// Create a new FilterProcessor from PhysicalFilter
     pub fn new(
-        source_name: impl Into<String>,
+        id: impl Into<String>,
+        physical_filter: Arc<PhysicalFilter>,
     ) -> Self {
         Self {
-            source_name: source_name.into(),
+            id: id.into(),
+            physical_filter,
             inputs: Vec::new(),
             outputs: Vec::new(),
         }
     }
+    
+    /// Create a FilterProcessor from a PhysicalPlan
+    /// Returns None if the plan is not a PhysicalFilter
+    pub fn from_physical_plan(
+        id: impl Into<String>,
+        plan: Arc<dyn crate::planner::physical::PhysicalPlan>,
+    ) -> Option<Self> {
+        plan.as_any().downcast_ref::<PhysicalFilter>().map(|filter| Self::new(id, Arc::new(filter.clone())))
+    }
 }
 
-impl Processor for DataSourceProcessor {
+/// Apply filter to a collection
+fn apply_filter(input_collection: &dyn Collection, filter_expr: &crate::expr::ScalarExpr) -> Result<Box<dyn Collection>, ProcessorError> {
+    // Use the collection's apply_filter method
+    input_collection.apply_filter(filter_expr)
+        .map_err(|e| ProcessorError::ProcessingError(format!("Failed to apply filter: {}", e)))
+}
+
+impl Processor for FilterProcessor {
     fn id(&self) -> &str {
-        &self.source_name
+        &self.id
     }
     
     fn start(&mut self) -> tokio::task::JoinHandle<Result<(), ProcessorError>> {
+        let id = self.id.clone();
         let mut inputs = std::mem::take(&mut self.inputs);
         let outputs = self.outputs.clone();
+        let filter_expr = self.physical_filter.scalar_predicate.clone();
         
         tokio::spawn(async move {
             loop {
@@ -74,8 +98,33 @@ impl Processor for DataSourceProcessor {
                                         }
                                     }
                                 }
+                            } else if let Some(collection) = data.as_collection() {
+                                // Apply filter to the collection
+                                match apply_filter(collection, &filter_expr) {
+                                    Ok(filtered_collection) => {
+                                        // Send filtered data to all outputs
+                                        let filtered_data = StreamData::collection(filtered_collection);
+                                        for output in &outputs {
+                                            if output.send(filtered_data.clone()).await.is_err() {
+                                                return Err(ProcessorError::ChannelClosed);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        // Send error downstream
+                                        let error_data = StreamData::error(
+                                            crate::processor::StreamError::new(e.to_string())
+                                                .with_source(id.clone()),
+                                        );
+                                        for output in &outputs {
+                                            if output.send(error_data.clone()).await.is_err() {
+                                                return Err(ProcessorError::ChannelClosed);
+                                            }
+                                        }
+                                    }
+                                }
                             } else {
-                                // Forward non-control data (Collection or Error)
+                                // Forward non-collection data (errors, etc.)
                                 for output in &outputs {
                                     if output.send(data.clone()).await.is_err() {
                                         return Err(ProcessorError::ChannelClosed);
@@ -91,6 +140,7 @@ impl Processor for DataSourceProcessor {
                         }
                     }
                 }
+                
                 // If all channels are closed and no data received, exit
                 if all_closed && !received_data {
                     return Ok(());

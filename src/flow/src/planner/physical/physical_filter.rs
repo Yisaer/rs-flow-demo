@@ -30,16 +30,6 @@ impl PhysicalFilter {
             scalar_predicate,
         }
     }
-
-    /// Create a new PhysicalFilter with only scalar predicate
-    pub fn new_scalar(scalar_predicate: ScalarExpr, children: Vec<Arc<dyn PhysicalPlan>>, index: i64) -> Self {
-        let base = BasePhysicalPlan::new(children, index);
-        Self {
-            base,
-            predicate: Expr::Value(sqlparser::ast::Value::Boolean(true)),
-            scalar_predicate,
-        }
-    }
 }
 
 impl PhysicalPlan for PhysicalFilter {
