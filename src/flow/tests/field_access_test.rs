@@ -28,13 +28,8 @@ fn test_field_access_simple() {
         struct_type.clone(),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("struct_col".to_string(), "test_table".to_string(), ConcreteDatatype::Struct(struct_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
-    let column = Column::new_2(
+    let column = Column::new(
         "test_table".to_string(),"struct_col".to_string(),
         vec![struct_value]
     );
@@ -77,13 +72,8 @@ fn test_field_access_string_field() {
         struct_type.clone(),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("struct_col".to_string(), "test_table".to_string(), ConcreteDatatype::Struct(struct_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
-    let column = Column::new_2(
+    let column = Column::new(
         "test_table".to_string(),"struct_col".to_string(),
         vec![struct_value]
     );
@@ -138,13 +128,8 @@ fn test_field_access_nested() {
         outer_struct_type.clone(),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("outer_struct".to_string(), "test_table".to_string(), ConcreteDatatype::Struct(outer_struct_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
-    let column = Column::new_2(
+    let column = Column::new(
         "test_table".to_string(), "outer_struct".to_string(),
         vec![outer_struct_value]
     );
@@ -184,13 +169,8 @@ fn test_field_access_field_not_found() {
         struct_type.clone(),
     ));
 
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("struct_col".to_string(), "test_table".to_string(), ConcreteDatatype::Struct(struct_type.clone())),
-    ]);
-
     // Create a single-row collection for vectorized testing
-    let column = Column::new_2(
+    let column = Column::new(
         "test_table".to_string(),"struct_col".to_string(),
         vec![struct_value]
     );
@@ -218,13 +198,8 @@ fn test_field_access_field_not_found() {
 /// Expected result: TypeMismatch error
 #[test]
 fn test_field_access_not_struct() {
-    // Create schema for the tuple
-    let _schema = Schema::new(vec![
-        ColumnSchema::new("int_col".to_string(), "test_table".to_string(), ConcreteDatatype::Int32(Int32Type)),
-    ]);
-
     // Create a single-row collection for vectorized testing
-    let column = Column::new_2(
+    let column = Column::new(
         "test_table".to_string(), "int_col".to_string(),
         vec![Value::Int32(42)]
     );

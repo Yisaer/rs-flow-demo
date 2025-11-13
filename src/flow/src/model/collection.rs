@@ -89,7 +89,7 @@ pub struct Column {
 
 impl Column {
     /// Create a new column
-    pub fn new_2(source_name: String,name: String, data: Vec<Value>) -> Self {
+    pub fn new(source_name: String,name: String, data: Vec<Value>) -> Self {
         Self { source_name,name, data }
     }
     

@@ -3,19 +3,17 @@ use crate::datatypes::ConcreteDatatype;
 /// Schema of a column
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ColumnSchema {
+    /// Source table name (which table this column belongs to)
+    pub source_name: String,
     /// Column name
     pub name: String,
     /// Column data type
     pub data_type: ConcreteDatatype,
-    /// Source table name (which table this column belongs to)
-    pub source_name: String,
 }
 
-impl ColumnSchema {
-    /// Create a new column schema with name, source table name, and data type
-    pub fn new(name: String, source_name: String, data_type: ConcreteDatatype) -> Self {
-        ColumnSchema { 
-            name, 
+impl ColumnSchema { pub fn new(source_name: String, name: String,data_type: ConcreteDatatype) -> Self {
+        ColumnSchema {
+            name,
             source_name,
             data_type,
         }

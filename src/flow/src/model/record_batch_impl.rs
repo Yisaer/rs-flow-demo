@@ -35,7 +35,7 @@ impl Collection for RecordBatch {
         
         for column in self.columns() {
             let new_data = column.values()[start..end].to_vec();
-            new_columns.push(Column::new_2(
+            new_columns.push(Column::new(
                 column.source_name.clone(),
                 column.name.clone(),
                 new_data
@@ -72,7 +72,7 @@ impl Collection for RecordBatch {
                     new_data.push(Value::Null);
                 }
             }
-            new_columns.push(Column::new_2(
+            new_columns.push(Column::new(
                 column.source_name.clone(),
                 column.name.clone(),
                 new_data
@@ -114,7 +114,7 @@ impl Collection for RecordBatch {
             }
             
             // Create new column with evaluated values
-            let column = Column::new_2(
+            let column = Column::new(
                 "".to_string(),
                 field.field_name.clone(),
                 evaluated_values,
@@ -170,7 +170,7 @@ impl Collection for RecordBatch {
         if selected_indices.is_empty() {
             let mut empty_columns = Vec::with_capacity(self.columns().len());
             for column in self.columns() {
-                empty_columns.push(Column::new_2(
+                empty_columns.push(Column::new(
                     column.source_name.clone(),
                     column.name.clone(),
                     Vec::new()
@@ -192,7 +192,7 @@ impl Collection for RecordBatch {
                     new_data.push(Value::Null);
                 }
             }
-            new_columns.push(Column::new_2(
+            new_columns.push(Column::new(
                 column.source_name.clone(),
                 column.name.clone(),
                 new_data
@@ -217,9 +217,9 @@ mod tests {
         let col_b_values = vec![Value::Int64(100), Value::Int64(200), Value::Int64(300)];
         let col_c_values = vec![Value::Int64(1000), Value::Int64(2000), Value::Int64(3000)];
 
-        let column_a = Column::new_2("".to_string(), "a".to_string(), col_a_values);
-        let column_b = Column::new_2("".to_string(), "b".to_string(), col_b_values);
-        let column_c = Column::new_2("".to_string(), "c".to_string(), col_c_values);
+        let column_a = Column::new("".to_string(), "a".to_string(), col_a_values);
+        let column_b = Column::new("".to_string(), "b".to_string(), col_b_values);
+        let column_c = Column::new("".to_string(), "c".to_string(), col_c_values);
         
         let batch = RecordBatch::new(vec![column_a, column_b, column_c]).expect("Failed to create RecordBatch");
 
@@ -272,8 +272,8 @@ mod tests {
         let col_a_values = vec![Value::Int64(10), Value::Int64(20), Value::Int64(30)];
         let col_b_values = vec![Value::Int64(100), Value::Int64(200), Value::Int64(300)];
         
-        let column_a = Column::new_2("".to_string(), "a".to_string(), col_a_values);
-        let column_b = Column::new_2("".to_string(), "b".to_string(), col_b_values);
+        let column_a = Column::new("".to_string(), "a".to_string(), col_a_values);
+        let column_b = Column::new("".to_string(), "b".to_string(), col_b_values);
         
         let batch = RecordBatch::new(vec![column_a, column_b]).expect("Failed to create RecordBatch");
         
@@ -307,7 +307,7 @@ mod tests {
     fn test_recordbatch_apply_filter_no_match() {
         // Create test data
         let col_a_values = vec![Value::Int64(10), Value::Int64(20), Value::Int64(30)];
-        let column_a = Column::new_2("".to_string(), "a".to_string(), col_a_values);
+        let column_a = Column::new("".to_string(), "a".to_string(), col_a_values);
         let batch = RecordBatch::new(vec![column_a]).expect("Failed to create RecordBatch");
         
         // Create filter expression: a > 100 (no matches)
@@ -331,7 +331,7 @@ mod tests {
     fn test_recordbatch_apply_filter_all_match() {
         // Create test data
         let col_a_values = vec![Value::Int64(10), Value::Int64(20), Value::Int64(30)];
-        let column_a = Column::new_2("".to_string(), "a".to_string(), col_a_values);
+        let column_a = Column::new("".to_string(), "a".to_string(), col_a_values);
         let batch = RecordBatch::new(vec![column_a]).expect("Failed to create RecordBatch");
         
         // Create filter expression: a > 5 (all matches)

@@ -63,8 +63,8 @@ fn test_core_conversion_flow() {
     data.insert(("".to_string(), "b".to_string()), Value::Int64(3));  // b = 3
 
     let collection = RecordBatch::new( vec![
-        Column::new_2("".to_string(), "a".to_string(), vec![Value::Int64(5)]),
-        Column::new_2("".to_string(), "b".to_string(), vec![Value::Int64(3)]),
+        Column::new("".to_string(), "a".to_string(), vec![Value::Int64(5)]),
+        Column::new("".to_string(), "b".to_string(), vec![Value::Int64(3)]),
     ]).unwrap();
 
     let results1 = expressions[0].eval_with_collection(&evaluator, &collection).expect("Calculation should succeed");
