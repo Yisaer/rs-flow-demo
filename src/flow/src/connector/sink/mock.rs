@@ -52,6 +52,10 @@ impl SinkConnector for MockSinkConnector {
         &self.id
     }
 
+    async fn ready(&mut self) -> Result<(), SinkConnectorError> {
+        Ok(())
+    }
+
     async fn send(&mut self, payload: &[u8]) -> Result<(), SinkConnectorError> {
         println!(
             "[mock_sink:{}] received payload: {}",

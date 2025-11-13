@@ -9,7 +9,7 @@ use flow::processor::processor_builder::PlanProcessor;
 use flow::processor::{ProcessorPipeline, SinkProcessor};
 use flow::Processor;
 
-const DEFAULT_BROKER_URL: &str = "tcp://127.0.0.1:1833";
+const DEFAULT_BROKER_URL: &str = "tcp://127.0.0.1:1883";
 const SOURCE_TOPIC: &str = "/yisa/data";
 const SINK_TOPIC: &str = "/yisa/data2";
 const MQTT_QOS: u8 = 1;
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     attach_mqtt_sources(&mut pipeline, DEFAULT_BROKER_URL, SOURCE_TOPIC, MQTT_QOS)?;
 
     pipeline.start();
-    println!("Pipeline running between MQTT topics {SOURCE_TOPIC} -> {SINK_TOPIC}.");
+    println!("Pipeline running between MQTT topics {SOURCE_TOPIC} -> {SINK_TOPIC} WITH SQL {sql}.");
     println!("Press Ctrl+C to terminate.");
 
     tokio::signal::ctrl_c().await?;

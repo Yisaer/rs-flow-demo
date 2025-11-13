@@ -93,6 +93,11 @@ impl DataSourceProcessor {
                 match event {
                     Ok(ConnectorEvent::Payload(bytes)) => match decoder.decode(&bytes) {
                         Ok(batch) => {
+                            println!(
+                                "[DataSourceProcessor:{}] received collection with {} rows",
+                                processor_id,
+                                batch.num_rows()
+                            );
                             if sender
                                 .send(StreamData::collection(Box::new(batch)))
                                 .await

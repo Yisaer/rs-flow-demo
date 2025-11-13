@@ -1,5 +1,7 @@
 pub mod collection;
 pub mod record_batch;
+#[cfg(debug_assertions)]
+mod record_batch_debug;
 pub mod record_batch_impl;
 
 pub use collection::{Collection, CollectionError, Column};

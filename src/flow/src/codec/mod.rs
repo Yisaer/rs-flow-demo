@@ -58,21 +58,12 @@ impl RecordDecoder for RawStringDecoder {
 /// Decoder that converts JSON documents (object or array) into a RecordBatch.
 pub struct JsonDecoder {
     source_name: String,
-    value_column: String,
 }
 
 impl JsonDecoder {
     pub fn new(source_name: impl Into<String>) -> Self {
-        Self::with_value_column(source_name, "value")
-    }
-
-    pub fn with_value_column(
-        source_name: impl Into<String>,
-        value_column: impl Into<String>,
-    ) -> Self {
         Self {
             source_name: source_name.into(),
-            value_column: value_column.into(),
         }
     }
 
@@ -80,7 +71,9 @@ impl JsonDecoder {
         match json {
             JsonValue::Object(map) => self.build_from_object_rows(vec![map]),
             JsonValue::Array(items) => self.decode_array(items),
-            other => self.build_scalar_column(vec![other]),
+            other => Err(CodecError::Other(format!(
+                "JSON root must be object or array, got {other:?}"
+            ))),
         }
     }
 
@@ -89,18 +82,20 @@ impl JsonDecoder {
             return Ok(RecordBatch::empty());
         }
 
-        if items.iter().all(|v| v.is_object()) {
-            let rows: Vec<JsonMap<String, JsonValue>> = items
-                .into_iter()
-                .map(|v| match v {
-                    JsonValue::Object(map) => map,
-                    _ => unreachable!("validated object rows"),
-                })
-                .collect();
-            return self.build_from_object_rows(rows);
+        if !items.iter().all(|v| v.is_object()) {
+            return Err(CodecError::Other(
+                "JSON array must contain only objects".to_string(),
+            ));
         }
 
-        self.build_scalar_column(items)
+        let rows: Vec<JsonMap<String, JsonValue>> = items
+            .into_iter()
+            .map(|v| match v {
+                JsonValue::Object(map) => map,
+                _ => unreachable!("validated object rows"),
+            })
+            .collect();
+        self.build_from_object_rows(rows)
     }
 
     fn build_from_object_rows(
@@ -119,11 +114,9 @@ impl JsonDecoder {
         }
 
         if keys.is_empty() {
-            let values = rows
-                .into_iter()
-                .map(JsonValue::Object)
-                .collect::<Vec<JsonValue>>();
-            return self.build_scalar_column(values);
+            return Err(CodecError::Other(
+                "JSON object rows must contain at least one field".to_string(),
+            ));
         }
 
         let mut columns = Vec::with_capacity(keys.len());
@@ -140,20 +133,6 @@ impl JsonDecoder {
         }
 
         Ok(RecordBatch::new(columns)?)
-    }
-
-    fn build_scalar_column(&self, values: Vec<JsonValue>) -> Result<RecordBatch, CodecError> {
-        if values.is_empty() {
-            return Ok(RecordBatch::empty());
-        }
-
-        let column_values = values.iter().map(json_to_value).collect::<Vec<_>>();
-        let column = Column::new(
-            self.source_name.clone(),
-            self.value_column.clone(),
-            column_values,
-        );
-        Ok(RecordBatch::new(vec![column])?)
     }
 }
 

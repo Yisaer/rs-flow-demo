@@ -11,6 +11,11 @@ pub trait SinkConnector: Send + Sync + 'static {
     /// Send a single payload downstream.
     async fn send(&mut self, payload: &[u8]) -> Result<(), SinkConnectorError>;
 
+    /// Prepare the connector for sending (e.g. establish network connections).
+    async fn ready(&mut self) -> Result<(), SinkConnectorError> {
+        Ok(())
+    }
+
     /// Signal that no more payloads will be sent.
     async fn close(&mut self) -> Result<(), SinkConnectorError> {
         Ok(())

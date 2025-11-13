@@ -15,6 +15,17 @@ struct ConnectorBinding {
 }
 
 impl ConnectorBinding {
+    async fn ready(&mut self) -> Result<(), ProcessorError> {
+        self.conn_ready().await
+    }
+
+    async fn conn_ready(&mut self) -> Result<(), ProcessorError> {
+        self.connector
+            .ready()
+            .await
+            .map_err(|err| ProcessorError::ProcessingError(err.to_string()))
+    }
+
     async fn publish(&mut self, collection: &dyn Collection) -> Result<(), ProcessorError> {
         let payloads = self
             .encoder
@@ -166,7 +177,15 @@ impl Processor for SinkProcessor {
         let processor_id = self.id.clone();
 
         tokio::spawn(async move {
+            for binding in connectors.iter_mut() {
+                binding.ready().await?;
+            }
             while let Some(data) = input_streams.next().await {
+                println!(
+                    "[SinkProcessor:{}] received {}",
+                    processor_id,
+                    data.description()
+                );
                 if let Some(collection) = data.as_collection() {
                     if let Err(err) = Self::handle_collection(&mut connectors, collection).await {
                         let error = StreamData::error(

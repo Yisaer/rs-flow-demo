@@ -91,6 +91,9 @@ impl Collection for RecordBatch {
         &self,
         fields: &[PhysicalProjectField],
     ) -> Result<Box<dyn Collection>, CollectionError> {
+        #[cfg(debug_assertions)]
+        self.debug_print();
+
         let num_rows = self.num_rows();
         let mut projected_columns = Vec::with_capacity(fields.len());
 
