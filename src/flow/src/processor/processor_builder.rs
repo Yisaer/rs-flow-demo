@@ -3,8 +3,8 @@
 //! This module provides utilities to build processor pipelines from PhysicalPlan,
 //! connecting ControlSourceProcessor outputs to leaf nodes (nodes without children).
 
+use crate::codec::encoder::JsonEncoder;
 use crate::connector::MockSinkConnector;
-use crate::encoder::JsonEncoder;
 use crate::planner::physical::{PhysicalDataSource, PhysicalFilter, PhysicalPlan, PhysicalProject};
 use crate::processor::{
     ControlSourceProcessor, DataSourceProcessor, FilterProcessor, Processor, ProcessorError,

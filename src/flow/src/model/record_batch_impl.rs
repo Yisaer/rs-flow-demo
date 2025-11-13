@@ -22,6 +22,10 @@ impl Collection for RecordBatch {
         self.column_by_name(source_name, name)
     }
 
+    fn column_by_column_name(&self, name: &str) -> Option<&Column> {
+        self.columns().iter().find(|column| column.name() == name)
+    }
+
     fn slice(&self, start: usize, end: usize) -> Result<Box<dyn Collection>, CollectionError> {
         if start > end || end > self.num_rows() {
             return Err(CollectionError::InvalidSliceRange {
@@ -91,8 +95,8 @@ impl Collection for RecordBatch {
         &self,
         fields: &[PhysicalProjectField],
     ) -> Result<Box<dyn Collection>, CollectionError> {
-        #[cfg(debug_assertions)]
-        self.debug_print();
+        // #[cfg(debug_assertions)]
+        // self.debug_print();
 
         let num_rows = self.num_rows();
         let mut projected_columns = Vec::with_capacity(fields.len());

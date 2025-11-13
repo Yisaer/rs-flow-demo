@@ -1,10 +1,6 @@
 //! Encoder abstractions for turning in-memory [`Collection`]s into outbound payloads.
-//!
-//! Sink processors rely on encoders to transform arbitrary collections into the
-//! format required by a downstream connector (e.g. JSON documents).
 
-use crate::model::{Collection, Column};
-use datatypes::Value;
+use crate::model::Collection;
 use serde_json::{Map as JsonMap, Number as JsonNumber, Value as JsonValue};
 
 /// Errors that can occur during encoding.
@@ -22,15 +18,11 @@ pub enum EncodeError {
 pub trait CollectionEncoder: Send + Sync + 'static {
     /// Identifier for metrics/logging.
     fn id(&self) -> &str;
-    /// Convert a collection into one or more payloads.
-    ///
-    /// Each entry in the returned vector represents a logical message that
-    /// should be sent downstream. Returning an empty vector means nothing
-    /// should be emitted for the provided collection.
-    fn encode(&self, collection: &dyn Collection) -> Result<Vec<Vec<u8>>, EncodeError>;
+    /// Convert a collection into a single payload.
+    fn encode(&self, collection: &dyn Collection) -> Result<Vec<u8>, EncodeError>;
 }
 
-/// Encoder that emits each row as a standalone JSON object.
+/// Encoder that emits the entire collection as a JSON array of row objects.
 pub struct JsonEncoder {
     id: String,
 }
@@ -47,15 +39,15 @@ impl CollectionEncoder for JsonEncoder {
         &self.id
     }
 
-    fn encode(&self, collection: &dyn Collection) -> Result<Vec<Vec<u8>>, EncodeError> {
+    fn encode(&self, collection: &dyn Collection) -> Result<Vec<u8>, EncodeError> {
         let num_rows = collection.num_rows();
         if num_rows == 0 || collection.num_columns() == 0 {
-            return Ok(Vec::new());
+            return serde_json::to_vec(&JsonValue::Array(Vec::new()))
+                .map_err(EncodeError::Serialization);
         }
 
-        let mut payloads = Vec::with_capacity(num_rows);
         let columns = collection.columns();
-
+        let mut rows = Vec::with_capacity(num_rows);
         for row_idx in 0..num_rows {
             let mut json_row = JsonMap::with_capacity(columns.len());
             for column in columns {
@@ -66,13 +58,15 @@ impl CollectionEncoder for JsonEncoder {
                     .unwrap_or(JsonValue::Null);
                 json_row.insert(key, value);
             }
-            let serialized = serde_json::to_vec(&JsonValue::Object(json_row))?;
-            payloads.push(serialized);
+            rows.push(JsonValue::Object(json_row));
         }
 
-        Ok(payloads)
+        serde_json::to_vec(&JsonValue::Array(rows)).map_err(EncodeError::Serialization)
     }
 }
+
+use crate::model::Column;
+use datatypes::Value;
 
 fn column_identifier(column: &Column) -> String {
     if column.source_name().is_empty() {
@@ -125,7 +119,7 @@ mod tests {
     use datatypes::Value;
 
     #[test]
-    fn json_encoder_emits_one_payload_per_row() {
+    fn json_encoder_emits_single_payload() {
         let column_a = Column::new(
             "orders".to_string(),
             "amount".to_string(),
@@ -142,13 +136,15 @@ mod tests {
         let batch = RecordBatch::new(vec![column_a, column_b]).expect("valid batch");
 
         let encoder = JsonEncoder::new("json");
-        let payloads = encoder.encode(&batch).expect("encode collection");
+        let payload = encoder.encode(&batch).expect("encode collection");
 
-        assert_eq!(payloads.len(), 2);
-        let first = serde_json::from_slice::<serde_json::Value>(&payloads[0]).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&payload).unwrap();
         assert_eq!(
-            first,
-            serde_json::json!({"orders.amount":10, "orders.status":"ok"})
+            json,
+            serde_json::json!([
+                {"orders.amount":10, "orders.status":"ok"},
+                {"orders.amount":20, "orders.status":"fail"}
+            ])
         );
     }
 }

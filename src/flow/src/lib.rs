@@ -1,13 +1,15 @@
 pub mod codec;
 pub mod connector;
-pub mod encoder;
 pub mod expr;
 pub mod model;
 pub mod planner;
 pub mod processor;
 
+pub use codec::{
+    CodecError, CollectionEncoder, EncodeError, JsonDecoder, JsonEncoder, RawStringDecoder,
+    RecordDecoder,
+};
 pub use datatypes::Schema;
-pub use encoder::{CollectionEncoder, EncodeError, JsonEncoder};
 #[cfg(feature = "datafusion")]
 pub use expr::datafusion_func::create_df_function_call;
 pub use expr::sql_conversion;
@@ -46,12 +48,7 @@ fn build_physical_plan_from_sql(
 ///
 /// # Example
 /// ```no_run
-/// use flow::{
-///     connector::MockSinkConnector,
-///     create_pipeline,
-///     encoder::JsonEncoder,
-///     processor::SinkProcessor,
-/// };
+/// use flow::{connector::MockSinkConnector, create_pipeline, JsonEncoder, processor::SinkProcessor};
 /// use std::sync::Arc;
 ///
 /// # fn demo() -> Result<(), Box<dyn std::error::Error>> {

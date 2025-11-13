@@ -1,7 +1,7 @@
 //! SinkProcessor - routes collections to SinkConnectors and forwards results.
 
+use crate::codec::encoder::CollectionEncoder;
 use crate::connector::SinkConnector;
-use crate::encoder::CollectionEncoder;
 use crate::model::Collection;
 use crate::processor::base::{broadcast_all, fan_in_streams};
 use crate::processor::{Processor, ProcessorError, StreamData, StreamError};
@@ -27,17 +27,15 @@ impl ConnectorBinding {
     }
 
     async fn publish(&mut self, collection: &dyn Collection) -> Result<(), ProcessorError> {
-        let payloads = self
+        let payload = self
             .encoder
             .encode(collection)
             .map_err(|err| ProcessorError::ProcessingError(err.to_string()))?;
 
-        for payload in payloads {
-            self.connector
-                .send(&payload)
-                .await
-                .map_err(|err| ProcessorError::ProcessingError(err.to_string()))?;
-        }
+        self.connector
+            .send(&payload)
+            .await
+            .map_err(|err| ProcessorError::ProcessingError(err.to_string()))?;
 
         Ok(())
     }
@@ -106,8 +104,8 @@ impl SinkProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codec::encoder::JsonEncoder;
     use crate::connector::MockSinkConnector;
-    use crate::encoder::JsonEncoder;
     use crate::model::{Column, RecordBatch};
     use crate::processor::StreamData;
     use datatypes::Value;
@@ -152,8 +150,8 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&payload).expect("valid json");
         assert_eq!(
             json,
-            serde_json::json!({"orders.amount":5}),
-            "encoded row should include column identifier"
+            serde_json::json!([{"orders.amount":5}]),
+            "encoded payload should wrap rows in an array"
         );
 
         // Stream end should also be propagated.

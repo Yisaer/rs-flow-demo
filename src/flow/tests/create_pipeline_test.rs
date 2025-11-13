@@ -7,9 +7,9 @@ use datatypes::Value;
 use flow::connector::MockSinkConnector;
 use flow::create_pipeline;
 use flow::create_pipeline_with_log_sink;
-use flow::encoder::JsonEncoder;
 use flow::model::{Column, RecordBatch as FlowRecordBatch};
 use flow::processor::{SinkProcessor, StreamData};
+use flow::JsonEncoder;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::time::{timeout, Duration};
@@ -300,7 +300,7 @@ async fn test_create_pipeline_with_custom_sink_connectors() {
         .expect("sink payload missing");
     let json_payload: serde_json::Value =
         serde_json::from_slice(&payload).expect("valid json payload");
-    assert_eq!(json_payload, json!({"a":10}));
+    assert_eq!(json_payload, json!([{"a":10}]));
 
     pipeline.close().await.expect("close pipeline");
 }

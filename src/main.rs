@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use flow::codec::JsonDecoder;
 use flow::connector::{MqttSinkConfig, MqttSinkConnector, MqttSourceConfig, MqttSourceConnector};
-use flow::encoder::JsonEncoder;
 use flow::processor::processor_builder::PlanProcessor;
 use flow::processor::{ProcessorPipeline, SinkProcessor};
+use flow::JsonEncoder;
 use flow::Processor;
 
 const DEFAULT_BROKER_URL: &str = "tcp://127.0.0.1:1883";
