@@ -136,6 +136,38 @@ async fn run_test_case(test_case: TestCase) {
 async fn test_create_pipeline_various_queries() {
     let test_cases = vec![
         TestCase {
+            name: "wildcard",
+            sql: "SELECT * FROM stream",
+            input_data: vec![
+                (
+                    "a".to_string(),
+                    vec![Value::Int64(10), Value::Int64(20), Value::Int64(30)],
+                ),
+                (
+                    "b".to_string(),
+                    vec![Value::Int64(100), Value::Int64(200), Value::Int64(300)],
+                ),
+                (
+                    "c".to_string(),
+                    vec![Value::Int64(1000), Value::Int64(2000), Value::Int64(3000)],
+                ),
+            ],
+            expected_rows: 3,
+            expected_columns: 3,
+            column_checks: vec![
+                ColumnCheck {
+                    column_index: 0,
+                    expected_name: "a".to_string(),
+                    expected_values: vec![Value::Int64(10), Value::Int64(20), Value::Int64(30)],
+                },
+                ColumnCheck {
+                    column_index: 1,
+                    expected_name: "b".to_string(),
+                    expected_values: vec![Value::Int64(100), Value::Int64(200), Value::Int64(300)],
+                },
+            ],
+        },
+        TestCase {
             name: "simple_projection",
             sql: "SELECT a + 1, b + 2 FROM stream",
             input_data: vec![
