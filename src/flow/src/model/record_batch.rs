@@ -143,4 +143,17 @@ impl RecordBatch {
 
         Self::new(new_columns)
     }
+
+    /// Return a new RecordBatch where every column's source_name becomes the provided value.
+    pub fn with_source_name(&self, source_name: &str) -> Result<Self, CollectionError> {
+        let mut renamed_columns = Vec::with_capacity(self.columns.len());
+        for column in &self.columns {
+            renamed_columns.push(Column::new(
+                source_name.to_string(),
+                column.name.clone(),
+                column.data.clone(),
+            ));
+        }
+        Self::new(renamed_columns)
+    }
 }

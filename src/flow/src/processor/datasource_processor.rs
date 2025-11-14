@@ -5,6 +5,7 @@
 
 use crate::codec::RecordDecoder;
 use crate::connector::{ConnectorEvent, SourceConnector};
+use crate::model::{Collection, Column, RecordBatch};
 use crate::processor::base::{fan_in_streams, DEFAULT_CHANNEL_CAPACITY};
 use crate::processor::{Processor, ProcessorError, StreamData, StreamError};
 use futures::stream::StreamExt;
@@ -123,6 +124,23 @@ impl DataSourceProcessor {
             }
         });
     }
+
+    fn rewrite_collection_sources(
+        collection: Box<dyn Collection>,
+        source_name: &str,
+    ) -> Result<Box<dyn Collection>, ProcessorError> {
+        let mut renamed_columns = Vec::with_capacity(collection.columns().len());
+        for column in collection.columns() {
+            renamed_columns.push(Column::new(
+                source_name.to_string(),
+                column.name.clone(),
+                column.values().to_vec(),
+            ));
+        }
+        RecordBatch::new(renamed_columns)
+            .map(|batch| Box::new(batch) as Box<dyn Collection>)
+            .map_err(|err| ProcessorError::ProcessingError(err.to_string()))
+    }
 }
 
 impl Processor for DataSourceProcessor {
@@ -132,13 +150,14 @@ impl Processor for DataSourceProcessor {
 
     fn start(&mut self) -> tokio::task::JoinHandle<Result<(), ProcessorError>> {
         let output = self.output.clone();
+        let processor_id = self.source_name.clone();
         let mut base_inputs = std::mem::take(&mut self.inputs);
         base_inputs.extend(self.activate_connectors());
         let mut input_streams = fan_in_streams(base_inputs);
 
         tokio::spawn(async move {
             while let Some(item) = input_streams.next().await {
-                let data = match item {
+                let mut data = match item {
                     Ok(data) => data,
                     Err(BroadcastStreamRecvError::Lagged(skipped)) => {
                         return Err(ProcessorError::ProcessingError(format!(
@@ -147,6 +166,11 @@ impl Processor for DataSourceProcessor {
                         )))
                     }
                 };
+                if let StreamData::Collection(collection) = data {
+                    let renamed =
+                        DataSourceProcessor::rewrite_collection_sources(collection, &processor_id)?;
+                    data = StreamData::Collection(renamed);
+                }
                 output
                     .send(data.clone())
                     .map_err(|_| ProcessorError::ChannelClosed)?;
