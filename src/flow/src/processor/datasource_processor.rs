@@ -5,7 +5,6 @@
 
 use crate::codec::RecordDecoder;
 use crate::connector::{ConnectorEvent, SourceConnector};
-use crate::model::{Collection, Column, RecordBatch};
 use crate::processor::base::{fan_in_streams, DEFAULT_CHANNEL_CAPACITY};
 use crate::processor::{Processor, ProcessorError, StreamData, StreamError};
 use futures::stream::StreamExt;
@@ -144,23 +143,6 @@ impl DataSourceProcessor {
             }
         });
     }
-
-    fn rewrite_collection_sources(
-        collection: Box<dyn Collection>,
-        source_name: &str,
-    ) -> Result<Box<dyn Collection>, ProcessorError> {
-        let mut renamed_columns = Vec::with_capacity(collection.columns().len());
-        for column in collection.columns() {
-            renamed_columns.push(Column::new(
-                source_name.to_string(),
-                column.name.clone(),
-                column.values().to_vec(),
-            ));
-        }
-        RecordBatch::new(renamed_columns)
-            .map(|batch| Box::new(batch) as Box<dyn Collection>)
-            .map_err(|err| ProcessorError::ProcessingError(err.to_string()))
-    }
 }
 
 impl Processor for DataSourceProcessor {
@@ -210,12 +192,10 @@ impl Processor for DataSourceProcessor {
                                     DATASOURCE_RECORDS_IN
                                         .with_label_values(&[processor_id.as_str()])
                                         .inc_by(rows);
-                                    let renamed =
-                                        DataSourceProcessor::rewrite_collection_sources(collection, &processor_id)?;
                                     DATASOURCE_RECORDS_OUT
                                         .with_label_values(&[processor_id.as_str()])
                                         .inc_by(rows);
-                                    data = StreamData::Collection(renamed);
+                                    data = StreamData::Collection(collection);
                                 }
                                 output
                                     .send(data.clone())
