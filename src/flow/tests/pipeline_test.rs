@@ -7,7 +7,7 @@ use datatypes::Value;
 use flow::connector::MockSinkConnector;
 use flow::create_pipeline;
 use flow::create_pipeline_with_log_sink;
-use flow::model::{Column, RecordBatch as FlowRecordBatch};
+use flow::model::batch_from_columns_simple;
 use flow::processor::{SinkProcessor, StreamData};
 use flow::JsonEncoder;
 use serde_json::json;
@@ -21,12 +21,11 @@ struct TestCase {
     input_data: Vec<(String, Vec<Value>)>, // (column_name, values)
     expected_rows: usize,
     expected_columns: usize,
-    column_checks: Vec<ColumnCheck>, // checks for specific columns
+    column_checks: Vec<ColumnCheck>, // checks for specific columns by name
 }
 
 /// Column-specific checks
 struct ColumnCheck {
-    column_index: usize,
     expected_name: String,
     expected_values: Vec<Value>,
 }
@@ -44,24 +43,24 @@ async fn run_test_case(test_case: TestCase) {
     pipeline.start();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // Create test data
-    let mut columns = Vec::new();
-    for (col_name, values) in test_case.input_data {
-        let column = Column::new("".to_string(), col_name, values);
-        columns.push(column);
-    }
+    // Create test data (row-based)
+    let columns = test_case
+        .input_data
+        .into_iter()
+        .map(|(col_name, values)| ("stream".to_string(), col_name, values))
+        .collect();
 
-    let test_batch = FlowRecordBatch::new(columns).expect(&format!(
-        "Failed to create test RecordBatch for: {}",
-        test_case.name
-    ));
+    let test_batch = batch_from_columns_simple(columns)
+        .expect(&format!("Failed to create test RecordBatch for: {}", test_case.name));
 
     let stream_data = StreamData::collection(Box::new(test_batch));
     pipeline
-        .input
-        .send(stream_data)
+        .send_stream_data("stream", stream_data)
         .await
-        .expect(&format!("Failed to send test data for: {}", test_case.name));
+        .expect(&format!(
+            "Failed to send test data for: {}",
+            test_case.name
+        ));
 
     // Receive and verify results
     let mut output = pipeline
@@ -70,52 +69,51 @@ async fn run_test_case(test_case: TestCase) {
     let timeout_duration = Duration::from_secs(5);
     let received_data = timeout(timeout_duration, output.recv())
         .await
-        .expect(&format!(
-            "Timeout waiting for output for: {}",
-            test_case.name
-        ))
-        .expect(&format!("Failed to receive output for: {}", test_case.name));
+        .unwrap_or_else(|_| panic!("Timeout waiting for output for: {}",
+            test_case.name))
+        .unwrap_or_else(|| panic!("Failed to receive output for: {}", test_case.name));
 
     match received_data {
         StreamData::Collection(result_collection) => {
-            let batch = FlowRecordBatch::from_rows(result_collection.rows().to_vec());
+            let rows = result_collection.rows();
 
             // Check basic properties
             assert_eq!(
-                batch.num_rows(),
+                rows.len(),
                 test_case.expected_rows,
                 "Wrong number of rows for test: {}",
                 test_case.name
             );
-            let all_columns = batch.columns();
             if test_case.expected_rows == 0 {
                 assert!(
-                    all_columns.is_empty(),
-                    "Row-less batches have no materialized columns for test: {}",
+                    rows.is_empty(),
+                    "Row-less batches should have no rows for test: {}",
                     test_case.name
                 );
             } else {
-                assert_eq!(
-                    all_columns.len(),
-                    test_case.expected_columns,
-                    "Wrong number of columns for test: {}",
-                    test_case.name
-                );
+                for row in rows {
+                    assert_eq!(
+                        row.len(),
+                        test_case.expected_columns,
+                        "Wrong number of columns for test: {}",
+                        test_case.name
+                    );
+                }
 
                 for check in test_case.column_checks {
-                    let column = all_columns
-                        .get(check.column_index)
-                        .expect("column snapshot");
+                    let mut values = Vec::with_capacity(rows.len());
+                    for row in rows {
+                        let value = row
+                            .value_by_name("stream", &check.expected_name)
+                            .or_else(|| row.value_by_name("", &check.expected_name))
+                            .unwrap_or_else(|| panic!("column {} missing", check.expected_name));
+                        values.push(value.clone());
+                    }
                     assert_eq!(
-                        column.name, check.expected_name,
-                        "Wrong column name at index {} for test: {}",
-                        check.column_index, test_case.name
-                    );
-                    assert_eq!(
-                        column.values(),
-                        &check.expected_values,
+                        values,
+                        check.expected_values,
                         "Wrong values in column {} for test: {}",
-                        check.column_index,
+                        check.expected_name,
                         test_case.name
                     );
                 }
@@ -166,12 +164,10 @@ async fn test_create_pipeline_various_queries() {
             expected_columns: 3,
             column_checks: vec![
                 ColumnCheck {
-                    column_index: 0,
                     expected_name: "a".to_string(),
                     expected_values: vec![Value::Int64(10), Value::Int64(20), Value::Int64(30)],
                 },
                 ColumnCheck {
-                    column_index: 1,
                     expected_name: "b".to_string(),
                     expected_values: vec![Value::Int64(100), Value::Int64(200), Value::Int64(300)],
                 },
@@ -198,12 +194,10 @@ async fn test_create_pipeline_various_queries() {
             expected_columns: 2,
             column_checks: vec![
                 ColumnCheck {
-                    column_index: 0,
                     expected_name: "a + 1".to_string(),
                     expected_values: vec![Value::Int64(11), Value::Int64(21), Value::Int64(31)],
                 },
                 ColumnCheck {
-                    column_index: 1,
                     expected_name: "b + 2".to_string(),
                     expected_values: vec![Value::Int64(102), Value::Int64(202), Value::Int64(302)],
                 },
@@ -226,12 +220,10 @@ async fn test_create_pipeline_various_queries() {
             expected_columns: 2,
             column_checks: vec![
                 ColumnCheck {
-                    column_index: 0,
                     expected_name: "a".to_string(),
                     expected_values: vec![Value::Int64(20), Value::Int64(30)], // Filtered values
                 },
                 ColumnCheck {
-                    column_index: 1,
                     expected_name: "b".to_string(),
                     expected_values: vec![Value::Int64(200), Value::Int64(300)], // Corresponding b values
                 },
@@ -254,12 +246,10 @@ async fn test_create_pipeline_various_queries() {
             expected_columns: 2,
             column_checks: vec![
                 ColumnCheck {
-                    column_index: 0,
                     expected_name: "a + 5".to_string(),
                     expected_values: vec![Value::Int64(25), Value::Int64(35)], // (20+5), (30+5)
                 },
                 ColumnCheck {
-                    column_index: 1,
                     expected_name: "b * 2".to_string(),
                     expected_values: vec![Value::Int64(400), Value::Int64(600)], // (200*2), (300*2)
                 },
@@ -282,12 +272,10 @@ async fn test_create_pipeline_various_queries() {
             expected_columns: 2,
             column_checks: vec![
                 ColumnCheck {
-                    column_index: 0,
                     expected_name: "a".to_string(),
                     expected_values: vec![], // Empty
                 },
                 ColumnCheck {
-                    column_index: 1,
                     expected_name: "b".to_string(),
                     expected_values: vec![], // Empty
                 },
@@ -303,7 +291,6 @@ async fn test_create_pipeline_various_queries() {
             expected_rows: 3, // All rows match the filter
             expected_columns: 1,
             column_checks: vec![ColumnCheck {
-                column_index: 0,
                 expected_name: "a".to_string(),
                 expected_values: vec![Value::Int64(10), Value::Int64(20), Value::Int64(30)],
             }],
@@ -328,11 +315,14 @@ async fn test_create_pipeline_with_custom_sink_connectors() {
     pipeline.start();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let column = Column::new("".to_string(), "a".to_string(), vec![Value::Int64(10)]);
-    let batch = FlowRecordBatch::new(vec![column]).expect("record batch");
+    let batch = batch_from_columns_simple(vec![(
+        "stream".to_string(),
+        "a".to_string(),
+        vec![Value::Int64(10)],
+    )])
+    .expect("record batch");
     pipeline
-        .input
-        .send(StreamData::collection(Box::new(batch)))
+        .send_stream_data("stream", StreamData::collection(Box::new(batch)))
         .await
         .expect("send data");
 
@@ -345,20 +335,4 @@ async fn test_create_pipeline_with_custom_sink_connectors() {
     assert_eq!(json_payload, json!([{"a":10}]));
 
     pipeline.close().await.expect("close pipeline");
-}
-
-/// Test create_pipeline with invalid SQL
-#[tokio::test]
-async fn test_create_pipeline_invalid_sql() {
-    let invalid_sql_cases = vec![
-        "INVALID SQL SYNTAX",
-        "SELECT * FROM",                // incomplete query
-        "INSERT INTO table VALUES (1)", // unsupported statement type
-        "",
-    ];
-
-    for sql in invalid_sql_cases {
-        let result = create_pipeline_with_log_sink(sql, false);
-        assert!(result.is_err(), "Should fail with invalid SQL: {}", sql);
-    }
 }

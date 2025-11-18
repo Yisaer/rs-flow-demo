@@ -75,8 +75,16 @@ impl ScalarExpr {
             } => {
                 if let Some(value) = tuple.value_by_name(source_name, column_name) {
                     Ok(value.clone())
-                } else if let Some(value) = tuple.value_by_column(column_name) {
-                    Ok(value.clone())
+                } else if source_name.is_empty() {
+                    tuple
+                        .messages()
+                        .iter()
+                        .find_map(|message| message.value(column_name))
+                        .cloned()
+                        .ok_or_else(|| EvalError::ColumnNotFound {
+                            source: source_name.clone(),
+                            column: column_name.clone(),
+                        })
                 } else {
                     Err(EvalError::ColumnNotFound {
                         source: source_name.clone(),
@@ -86,10 +94,9 @@ impl ScalarExpr {
             }
             ScalarExpr::Wildcard { source_name } => {
                 let selected: Vec<_> = tuple
-                    .columns
-                    .iter()
-                    .zip(tuple.values.iter())
-                    .filter(|((src, _), _)| match source_name {
+                    .entries()
+                    .into_iter()
+                    .filter(|((src, _), _)| match source_name.as_ref() {
                         Some(prefix) => src == prefix,
                         None => true,
                     })
@@ -106,7 +113,7 @@ impl ScalarExpr {
                 let mut values = Vec::with_capacity(selected.len());
                 for ((_, column_name), value) in selected {
                     fields.push(StructField::new(
-                        column_name.clone(),
+                        column_name.to_string(),
                         value.datatype(),
                         true,
                     ));

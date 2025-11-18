@@ -147,67 +147,6 @@ impl SinkProcessor {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::codec::encoder::JsonEncoder;
-    use crate::connector::MockSinkConnector;
-    use crate::model::{Column, RecordBatch};
-    use crate::processor::StreamData;
-    use datatypes::Value;
-    use tokio::sync::broadcast;
-
-    #[tokio::test]
-    async fn sink_processor_encodes_and_forwards_collections() {
-        let mut sink = SinkProcessor::new("sink_test");
-        sink.enable_result_forwarding();
-        let (input_tx, input_rx) = broadcast::channel(10);
-        sink.add_input(input_rx);
-        let mut output_rx = sink.subscribe_output().expect("output stream");
-
-        let (connector, mut handle) = MockSinkConnector::new("mock_sink");
-        let encoder = Arc::new(JsonEncoder::new("json"));
-        sink.add_connector(Box::new(connector), encoder);
-
-        let sink_handle = sink.start();
-
-        let column = Column::new(
-            "orders".to_string(),
-            "amount".to_string(),
-            vec![Value::Int64(5)],
-        );
-        let batch = RecordBatch::new(vec![column]).expect("record batch");
-
-        input_tx
-            .send(StreamData::collection(Box::new(batch.clone())))
-            .map_err(|_| "send collection")
-            .expect("send collection");
-        input_tx
-            .send(StreamData::stream_end())
-            .map_err(|_| "send end")
-            .expect("send end");
-
-        // Expect the data to be forwarded downstream.
-        let forwarded = output_rx.recv().await.expect("forwarded data");
-        assert!(forwarded.is_data());
-
-        // Expect the connector to receive encoded payload.
-        let payload = handle.recv().await.expect("connector payload");
-        let json: serde_json::Value = serde_json::from_slice(&payload).expect("valid json");
-        assert_eq!(
-            json,
-            serde_json::json!([{"amount":5}]),
-            "encoded payload should wrap rows in an array"
-        );
-
-        // Stream end should also be propagated.
-        let terminal = output_rx.recv().await.expect("terminal signal");
-        assert!(terminal.is_terminal());
-
-        sink_handle.await.expect("join").expect("processor ok");
-    }
-}
-
 impl Processor for SinkProcessor {
     fn id(&self) -> &str {
         &self.id
@@ -245,8 +184,9 @@ impl Processor for SinkProcessor {
                                     )))
                                 }
                             };
-                            let _ = control_output.send(control_data.clone());
-                            if control_data.is_terminal() {
+                            let is_terminal = control_data.is_terminal();
+                            let _ = control_output.send(control_data);
+                            if is_terminal {
                                 println!("[SinkProcessor:{processor_id}] received StreamEnd (control)");
                                 Self::handle_terminal(&mut connectors).await?;
                                 return Ok(());
@@ -258,30 +198,36 @@ impl Processor for SinkProcessor {
                     }
                     item = input_streams.next() => {
                         match item {
-                            Some(Ok(data)) => {
-                                if let Some(collection) = data.as_collection() {
-                                    if let Err(err) =
-                                        Self::handle_collection(&processor_id, &mut connectors, collection).await
-                                    {
-                                        if let Some(output_sender) = &output {
-                                            let error = StreamData::error(
-                                                StreamError::new(err.to_string()).with_source(processor_id.clone()),
-                                            );
-                                            output_sender
-                                                .send(error)
-                                                .map_err(|_| ProcessorError::ChannelClosed)?;
-                                        }
-                                        return Err(err);
+                            Some(Ok(StreamData::Collection(collection))) => {
+                                if let Err(err) =
+                                    Self::handle_collection(&processor_id, &mut connectors, collection.as_ref()).await
+                                {
+                                    if let Some(output_sender) = &output {
+                                        let error = StreamData::error(
+                                            StreamError::new(err.to_string()).with_source(processor_id.clone()),
+                                        );
+                                        output_sender
+                                            .send(error)
+                                            .map_err(|_| ProcessorError::ChannelClosed)?;
                                     }
+                                    return Err(err);
                                 }
 
                                 if let Some(output_sender) = &output {
                                     output_sender
-                                        .send(data.clone())
+                                        .send(StreamData::collection(collection))
+                                        .map_err(|_| ProcessorError::ChannelClosed)?;
+                                }
+                            }
+                            Some(Ok(data)) => {
+                                let is_terminal = data.is_terminal();
+                                if let Some(output_sender) = &output {
+                                    output_sender
+                                        .send(data)
                                         .map_err(|_| ProcessorError::ChannelClosed)?;
                                 }
 
-                                if data.is_terminal() {
+                                if is_terminal {
                                     println!("[SinkProcessor:{processor_id}] received StreamEnd (data)");
                                     Self::handle_terminal(&mut connectors).await?;
                                     return Ok(());

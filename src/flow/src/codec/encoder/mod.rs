@@ -20,8 +20,8 @@ pub trait CollectionEncoder: Send + Sync + 'static {
     fn id(&self) -> &str;
     /// Convert a collection into a single payload.
     fn encode(&self, collection: &dyn Collection) -> Result<Vec<u8>, EncodeError>;
-    /// Convert a slice of tuples into a single payload.
-    fn encode_tuples(&self, tuples: &[Tuple]) -> Result<Vec<u8>, EncodeError>;
+    /// Convert a tuple into a single payload.
+    fn encode_tuple(&self, tuple: &Tuple) -> Result<Vec<u8>, EncodeError>;
 }
 
 /// Encoder that emits the entire collection as a JSON array of row objects.
@@ -35,14 +35,13 @@ impl JsonEncoder {
         Self { id: id.into() }
     }
 
-    /// Encode one or more tuples as a JSON array payload.
-    pub fn encode_tuples(&self, tuples: &[Tuple]) -> Result<Vec<u8>, EncodeError> {
-        self.encode_tuples_impl(tuples)
+    /// Encode a tuple as a JSON object payload.
+    pub fn encode_tuple(&self, tuple: &Tuple) -> Result<Vec<u8>, EncodeError> {
+        self.encode_tuple_impl(tuple)
     }
 
-    fn encode_tuples_impl(&self, tuples: &[Tuple]) -> Result<Vec<u8>, EncodeError> {
-        let rows: Vec<JsonValue> = tuples.iter().map(tuple_to_json).collect();
-        serde_json::to_vec(&JsonValue::Array(rows)).map_err(EncodeError::Serialization)
+    fn encode_tuple_impl(&self, tuple: &Tuple) -> Result<Vec<u8>, EncodeError> {
+        serde_json::to_vec(&tuple_to_json(tuple)).map_err(EncodeError::Serialization)
     }
 }
 
@@ -59,8 +58,8 @@ impl CollectionEncoder for JsonEncoder {
             let mut json_rows = Vec::with_capacity(rows.len());
             for tuple in rows {
                 let mut json_row = JsonMap::new();
-                for ((_, column_name), value) in tuple.columns.iter().zip(tuple.values.iter()) {
-                    json_row.insert(column_name.clone(), value_to_json(value));
+                for ((_, column_name), value) in tuple.entries() {
+                    json_row.insert(column_name.to_string(), value_to_json(value));
                 }
                 json_rows.push(JsonValue::Object(json_row));
             }
@@ -70,8 +69,8 @@ impl CollectionEncoder for JsonEncoder {
         Ok(payload)
     }
 
-    fn encode_tuples(&self, tuples: &[Tuple]) -> Result<Vec<u8>, EncodeError> {
-        self.encode_tuples_impl(tuples)
+    fn encode_tuple(&self, tuple: &Tuple) -> Result<Vec<u8>, EncodeError> {
+        self.encode_tuple_impl(tuple)
     }
 }
 
@@ -108,14 +107,9 @@ fn value_to_json(value: &Value) -> JsonValue {
 }
 
 fn tuple_to_json(tuple: &Tuple) -> JsonValue {
-    debug_assert_eq!(
-        tuple.columns.len(),
-        tuple.values.len(),
-        "Tuple columns and values length mismatch"
-    );
-    let mut json_row = JsonMap::with_capacity(tuple.columns.len());
-    for ((_, column_name), value) in tuple.columns.iter().zip(tuple.values.iter()) {
-        json_row.insert(column_name.clone(), value_to_json(value));
+    let mut json_row = JsonMap::with_capacity(tuple.len());
+    for ((_, column_name), value) in tuple.entries() {
+        json_row.insert(column_name.to_string(), value_to_json(value));
     }
     JsonValue::Object(json_row)
 }
@@ -129,25 +123,28 @@ fn number_from_f64(value: f64) -> JsonValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Column, RecordBatch, Tuple};
+    use crate::model::{batch_from_columns_simple, Message, Tuple};
     use datatypes::Value;
+    use std::sync::Arc;
 
     #[test]
     fn json_encoder_emits_single_payload() {
-        let column_a = Column::new(
-            "orders".to_string(),
-            "amount".to_string(),
-            vec![Value::Int64(10), Value::Int64(20)],
-        );
-        let column_b = Column::new(
-            "orders".to_string(),
-            "status".to_string(),
-            vec![
-                Value::String("ok".to_string()),
-                Value::String("fail".to_string()),
-            ],
-        );
-        let batch = RecordBatch::new(vec![column_a, column_b]).expect("valid batch");
+        let batch = batch_from_columns_simple(vec![
+            (
+                "orders".to_string(),
+                "amount".to_string(),
+                vec![Value::Int64(10), Value::Int64(20)],
+            ),
+            (
+                "orders".to_string(),
+                "status".to_string(),
+                vec![
+                    Value::String("ok".to_string()),
+                    Value::String("fail".to_string()),
+                ],
+            ),
+        ])
+        .expect("valid batch");
 
         let encoder = JsonEncoder::new("json");
         let payload = encoder.encode(&batch).expect("encode collection");
@@ -163,19 +160,15 @@ mod tests {
     }
 
     #[test]
-    fn json_encoder_encodes_tuples() {
-        let tuple = Tuple::new(
-            "orders".to_string(),
-            vec![
-                ("orders".to_string(), "amount".to_string()),
-                ("orders".to_string(), "status".to_string()),
-            ],
-            vec![Value::Int64(5), Value::String("ok".to_string())],
-        );
+    fn json_encoder_encodes_tuple() {
+        let keys = vec!["amount".to_string(), "status".to_string()];
+        let values = vec![Value::Int64(5), Value::String("ok".to_string())];
+        let message = Arc::new(Message::new(Arc::<str>::from("orders"), keys, values));
+        let tuple = Tuple::new(vec![message]);
         let encoder = JsonEncoder::new("json");
-        let payload = encoder.encode_tuples(&[tuple]).expect("encode tuples");
+        let payload = encoder.encode_tuple(&tuple).expect("encode tuple");
 
         let json: serde_json::Value = serde_json::from_slice(&payload).unwrap();
-        assert_eq!(json, serde_json::json!([{"amount":5, "status":"ok"}]));
+        assert_eq!(json, serde_json::json!({"amount":5, "status":"ok"}));
     }
 }

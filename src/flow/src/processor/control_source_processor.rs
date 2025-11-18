@@ -4,7 +4,6 @@
 //! that coordinate the entire stream processing pipeline.
 
 use crate::processor::base::DEFAULT_CHANNEL_CAPACITY;
-use crate::processor::collection_utils::rewrite_collection_sources;
 use crate::processor::{Processor, ProcessorError, StreamData};
 use futures::stream::StreamExt;
 use tokio::sync::broadcast;
@@ -57,15 +56,9 @@ impl ControlSourceProcessor {
     /// method now returns an error to signal that behavior.
     pub async fn send_stream_data(
         &self,
-        processor_id: &str,
+        _processor_id: &str,
         data: StreamData,
     ) -> Result<(), ProcessorError> {
-        let data = match data {
-            StreamData::Collection(collection) => {
-                StreamData::Collection(rewrite_collection_sources(collection, processor_id))
-            }
-            other => other,
-        };
         self.send(data).await
     }
 }
@@ -105,10 +98,11 @@ impl Processor for ControlSourceProcessor {
                 if data.is_control() {
                     let _ = control_output.send(data.clone());
                 }
+                let is_terminal = data.is_terminal();
                 output
-                    .send(data.clone())
+                    .send(data)
                     .map_err(|_| ProcessorError::ChannelClosed)?;
-                if data.is_terminal() {
+                if is_terminal {
                     println!("[ControlSourceProcessor:{processor_id}] received StreamEnd");
                     return Ok(());
                 }

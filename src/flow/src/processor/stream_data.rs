@@ -3,7 +3,6 @@
 //! Defines the data types that flow between processors in the stream processing pipeline.
 
 use crate::model::Collection;
-use std::sync::Arc;
 
 /// Control signals for stream processing
 #[derive(Debug, Clone, PartialEq)]
@@ -21,8 +20,8 @@ pub enum ControlSignal {
 /// Core data type for stream processing - unified enum for all data types
 #[derive(Clone)]
 pub enum StreamData {
-    /// Data payload - Collection (shared reference)
-    Collection(Arc<dyn Collection>),
+    /// Data payload - Collection (owned)
+    Collection(Box<dyn Collection>),
     /// Control signal for flow management
     Control(ControlSignal),
     /// Error that occurred during processing - wrapped for flow continuation
@@ -81,7 +80,7 @@ impl std::error::Error for StreamError {}
 impl StreamData {
     /// Create Collection data
     pub fn collection(collection: Box<dyn Collection>) -> Self {
-        StreamData::Collection(Arc::from(collection))
+        StreamData::Collection(collection)
     }
 
     /// Create control signal
@@ -123,6 +122,22 @@ impl StreamData {
     pub fn as_collection(&self) -> Option<&dyn Collection> {
         match self {
             StreamData::Collection(collection) => Some(collection.as_ref()),
+            _ => None,
+        }
+    }
+
+    /// Extract mutable collection reference if present
+    pub fn as_collection_mut(&mut self) -> Option<&mut dyn Collection> {
+        match self {
+            StreamData::Collection(collection) => Some(collection.as_mut()),
+            _ => None,
+        }
+    }
+
+    /// Consume and return the owned collection if present
+    pub fn into_collection(self) -> Option<Box<dyn Collection>> {
+        match self {
+            StreamData::Collection(collection) => Some(collection),
             _ => None,
         }
     }
