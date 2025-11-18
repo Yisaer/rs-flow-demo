@@ -4,7 +4,7 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 mod metrics;
 
-use crate::metrics::{CPU_SECONDS_TOTAL_COUNTER, CPU_USAGE_GAUGE, MEMORY_USAGE_GAUGE};
+use crate::metrics::{CPU_USAGE_GAUGE, MEMORY_USAGE_GAUGE};
 use pprof::protos::Message;
 use pprof::ProfilerGuard;
 use std::env;
@@ -76,20 +76,14 @@ async fn init_metrics_exporter() -> Result<(), Box<dyn std::error::Error + Send 
             if let Some(proc_info) = system.process(pid) {
                 let cpu_usage_percent = proc_info.cpu_usage() as f64;
                 CPU_USAGE_GAUGE.set(cpu_usage_percent as i64);
-                let delta_secs = (cpu_usage_percent / 100.0) * poll_interval as f64;
-                if delta_secs.is_finite() && delta_secs >= 0.0 {
-                    CPU_SECONDS_TOTAL_COUNTER.inc_by(delta_secs);
-                }
                 MEMORY_USAGE_GAUGE.set(proc_info.memory() as i64);
             } else {
                 CPU_USAGE_GAUGE.set(0);
                 MEMORY_USAGE_GAUGE.set(0);
             }
-
             sleep(Duration::from_secs(poll_interval)).await;
         }
     });
-
     Ok(())
 }
 
