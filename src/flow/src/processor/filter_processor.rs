@@ -112,33 +112,32 @@ impl Processor for FilterProcessor {
                     }
                     item = input_streams.next() => {
                         match item {
+                            Some(Ok(StreamData::Collection(collection))) => {
+                                match apply_filter(collection.as_ref(), &filter_expr) {
+                                    Ok(filtered_collection) => {
+                                        let filtered_data = StreamData::collection(filtered_collection);
+                                        output
+                                            .send(filtered_data)
+                                            .map_err(|_| ProcessorError::ChannelClosed)?;
+                                    }
+                                    Err(e) => {
+                                        let error_data = StreamData::error(
+                                            StreamError::new(e.to_string()).with_source(id.clone()),
+                                        );
+                                        output
+                                            .send(error_data)
+                                            .map_err(|_| ProcessorError::ChannelClosed)?;
+                                    }
+                                }
+                            }
                             Some(Ok(data)) => {
-                                if let Some(collection) = data.as_collection() {
-                                    match apply_filter(collection, &filter_expr) {
-                                        Ok(filtered_collection) => {
-                                            let filtered_data = StreamData::collection(filtered_collection);
-                                            output
-                                                .send(filtered_data)
-                                                .map_err(|_| ProcessorError::ChannelClosed)?;
-                                        }
-                                        Err(e) => {
-                                            let error_data = StreamData::error(
-                                                StreamError::new(e.to_string()).with_source(id.clone()),
-                                            );
-                                            output
-                                                .send(error_data)
-                                                .map_err(|_| ProcessorError::ChannelClosed)?;
-                                        }
-                                    }
-                                } else {
-                                    let is_terminal = data.is_terminal();
-                                    output
-                                        .send(data)
-                                        .map_err(|_| ProcessorError::ChannelClosed)?;
-                                    if is_terminal {
-                                        println!("[FilterProcessor:{id}] received StreamEnd (data)");
-                                        return Ok(());
-                                    }
+                                let is_terminal = data.is_terminal();
+                                output
+                                    .send(data)
+                                    .map_err(|_| ProcessorError::ChannelClosed)?;
+                                if is_terminal {
+                                    println!("[FilterProcessor:{id}] received StreamEnd (data)");
+                                    return Ok(());
                                 }
                             }
                             Some(Err(BroadcastStreamRecvError::Lagged(skipped))) => {

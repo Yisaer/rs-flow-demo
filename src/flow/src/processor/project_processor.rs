@@ -112,33 +112,32 @@ impl Processor for ProjectProcessor {
                     }
                     item = input_streams.next() => {
                         match item {
+                            Some(Ok(StreamData::Collection(collection))) => {
+                                match apply_projection(collection.as_ref(), &fields) {
+                                    Ok(projected_collection) => {
+                                        let projected_data = StreamData::collection(projected_collection);
+                                        output
+                                            .send(projected_data)
+                                            .map_err(|_| ProcessorError::ChannelClosed)?;
+                                    }
+                                    Err(e) => {
+                                        let error_data = StreamData::error(
+                                            StreamError::new(e.to_string()).with_source(id.clone()),
+                                        );
+                                        output
+                                            .send(error_data)
+                                            .map_err(|_| ProcessorError::ChannelClosed)?;
+                                    }
+                                }
+                            }
                             Some(Ok(data)) => {
-                                if let Some(collection) = data.as_collection() {
-                                    match apply_projection(collection, &fields) {
-                                        Ok(projected_collection) => {
-                                            let projected_data = StreamData::collection(projected_collection);
-                                            output
-                                                .send(projected_data)
-                                                .map_err(|_| ProcessorError::ChannelClosed)?;
-                                        }
-                                        Err(e) => {
-                                            let error_data = StreamData::error(
-                                                StreamError::new(e.to_string()).with_source(id.clone()),
-                                            );
-                                            output
-                                                .send(error_data)
-                                                .map_err(|_| ProcessorError::ChannelClosed)?;
-                                        }
-                                    }
-                                } else {
-                                    let is_terminal = data.is_terminal();
-                                    output
-                                        .send(data)
-                                        .map_err(|_| ProcessorError::ChannelClosed)?;
-                                    if is_terminal {
-                                        println!("[ProjectProcessor:{id}] received StreamEnd (data)");
-                                        return Ok(());
-                                    }
+                                let is_terminal = data.is_terminal();
+                                output
+                                    .send(data)
+                                    .map_err(|_| ProcessorError::ChannelClosed)?;
+                                if is_terminal {
+                                    println!("[ProjectProcessor:{id}] received StreamEnd (data)");
+                                    return Ok(());
                                 }
                             }
                             Some(Err(BroadcastStreamRecvError::Lagged(skipped))) => {

@@ -133,4 +133,22 @@ impl Tuple {
             .find(|msg| msg.source() == source)
             .and_then(|msg| msg.value(column))
     }
+
+    pub fn len(&self) -> usize {
+        let aff_len = self.affiliate.as_ref().map(|aff| aff.index.len()).unwrap_or(0);
+        let msg_len: usize = self.messages.iter().map(|msg| msg.index.len()).sum();
+        aff_len + msg_len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn messages(&self) -> &[Arc<Message>] {
+        &self.messages
+    }
+
+    pub fn message_by_source(&self, source: &str) -> Option<&Arc<Message>> {
+        self.messages.iter().find(|msg| msg.source() == source)
+    }
 }

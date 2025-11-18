@@ -59,7 +59,7 @@ impl CollectionEncoder for JsonEncoder {
             for tuple in rows {
                 let mut json_row = JsonMap::new();
                 for ((_, column_name), value) in tuple.entries() {
-                    json_row.insert(column_name.clone(), value_to_json(value));
+                    json_row.insert(column_name.to_string(), value_to_json(value));
                 }
                 json_rows.push(JsonValue::Object(json_row));
             }
@@ -109,7 +109,7 @@ fn value_to_json(value: &Value) -> JsonValue {
 fn tuple_to_json(tuple: &Tuple) -> JsonValue {
     let mut json_row = JsonMap::with_capacity(tuple.len());
     for ((_, column_name), value) in tuple.entries() {
-        json_row.insert(column_name.clone(), value_to_json(value));
+        json_row.insert(column_name.to_string(), value_to_json(value));
     }
     JsonValue::Object(json_row)
 }
@@ -123,25 +123,28 @@ fn number_from_f64(value: f64) -> JsonValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{batch_from_columns, Column, Tuple};
+    use crate::model::{batch_from_columns_simple, Message, Tuple};
     use datatypes::Value;
+    use std::sync::Arc;
 
     #[test]
     fn json_encoder_emits_single_payload() {
-        let column_a = Column::new(
-            "orders".to_string(),
-            "amount".to_string(),
-            vec![Value::Int64(10), Value::Int64(20)],
-        );
-        let column_b = Column::new(
-            "orders".to_string(),
-            "status".to_string(),
-            vec![
-                Value::String("ok".to_string()),
-                Value::String("fail".to_string()),
-            ],
-        );
-        let batch = batch_from_columns(vec![column_a, column_b]).expect("valid batch");
+        let batch = batch_from_columns_simple(vec![
+            (
+                "orders".to_string(),
+                "amount".to_string(),
+                vec![Value::Int64(10), Value::Int64(20)],
+            ),
+            (
+                "orders".to_string(),
+                "status".to_string(),
+                vec![
+                    Value::String("ok".to_string()),
+                    Value::String("fail".to_string()),
+                ],
+            ),
+        ])
+        .expect("valid batch");
 
         let encoder = JsonEncoder::new("json");
         let payload = encoder.encode(&batch).expect("encode collection");
@@ -158,13 +161,12 @@ mod tests {
 
     #[test]
     fn json_encoder_encodes_tuple() {
-        let mut index = std::collections::HashMap::new();
-        index.insert(("orders".to_string(), "amount".to_string()), 0);
-        index.insert(("orders".to_string(), "status".to_string()), 1);
-        let tuple = Tuple::new(
-            index,
-            vec![Value::Int64(5), Value::String("ok".to_string())],
-        );
+        let entries = vec![
+            (Arc::new("amount".to_string()), Value::Int64(5)),
+            (Arc::new("status".to_string()), Value::String("ok".to_string())),
+        ];
+        let message = Arc::new(Message::new("orders".to_string(), entries));
+        let tuple = Tuple::new(vec![message]);
         let encoder = JsonEncoder::new("json");
         let payload = encoder.encode_tuple(&tuple).expect("encode tuple");
 

@@ -3,7 +3,7 @@ use crate::expr::ScalarExpr;
 use crate::model::{Collection, CollectionError, Tuple};
 use crate::planner::physical::PhysicalProjectField;
 use datatypes::Value;
-use std::collections::HashMap;
+use std::sync::Arc;
 
 impl Collection for RecordBatch {
     fn num_rows(&self) -> usize {
@@ -54,33 +54,29 @@ impl Collection for RecordBatch {
     ) -> Result<Box<dyn Collection>, CollectionError> {
         let mut projected_rows = Vec::with_capacity(self.num_rows());
         for tuple in self.rows() {
-            let mut projected_index = HashMap::new();
-            let mut projected_values = Vec::new();
+            let mut projected_tuple = Tuple::new(Vec::new());
+            let mut projected_messages = Vec::new();
+
             for field in fields {
                 if let ScalarExpr::Wildcard { source_name } = &field.compiled_expr {
-                    let selected: Vec<_> = tuple
-                        .entries()
-                        .filter(|((src, _), _)| match source_name.as_ref() {
-                            Some(prefix) => src == prefix,
-                            None => true,
-                        })
-                        .collect();
-
-                    if selected.is_empty() && source_name.is_some() {
-                        let qualifier = source_name
-                            .as_ref()
-                            .map(|prefix| format!("{}.*", prefix))
-                            .unwrap_or_else(|| "*".to_string());
-                        return Err(CollectionError::Other(format!(
-                            "Failed to evaluate expression for field '{}': Column not found: {}",
-                            field.field_name, qualifier
-                        )));
-                    }
-
-                    for ((src, name), value) in selected {
-                        let idx = projected_values.len();
-                        projected_index.insert((src.clone(), name.clone()), idx);
-                        projected_values.push(value.clone());
+                    match source_name {
+                        Some(prefix) => {
+                            if let Some(message) = tuple.message_by_source(prefix) {
+                                projected_messages.push(message.clone());
+                            } else {
+                                let qualifier = format!("{}.*", prefix);
+                                return Err(CollectionError::Other(format!(
+                                    "Failed to evaluate expression for field '{}': Column not found: {}",
+                                    field.field_name, qualifier
+                                )));
+                            }
+                        }
+                        None => {
+                            if tuple.messages().is_empty() {
+                                continue;
+                            }
+                            projected_messages.extend(tuple.messages().iter().cloned());
+                        }
                     }
                     continue;
                 }
@@ -95,13 +91,17 @@ impl Collection for RecordBatch {
                         ))
                     })?;
 
-                let key = ("".to_string(), field.field_name.clone());
-                let idx = projected_values.len();
-                projected_index.insert(key, idx);
-                projected_values.push(value);
+                projected_tuple.add_affiliate_column(
+                    Arc::new(field.field_name.clone()),
+                    value,
+                );
             }
 
-            projected_rows.push(Tuple::new(projected_index, projected_values));
+            if !projected_messages.is_empty() {
+                projected_tuple.messages = projected_messages;
+            }
+
+            projected_rows.push(projected_tuple);
         }
 
         Ok(Box::new(RecordBatch::new(projected_rows)?))
