@@ -1,71 +1,125 @@
 use datatypes::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 
-/// Tuple represents a single row of data decoded from a source.
-///
-/// The ordered list of fully qualified column identifiers and their values is
-/// captured via the `(source_name, column_name)` index pointing to entries in
-/// `values`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Tuple {
-    pub values: Vec<Value>,
-    index: HashMap<(String, String), usize>,
+/// Immutable data from a single source.
+#[derive(Debug)]
+pub struct Message {
+    source: String,
+    values: Vec<Value>,
+    index: HashMap<Arc<String>, usize>,
 }
 
-impl Tuple {
-    /// Build a new tuple, assuming the caller provides matching column/value
-    /// lengths.
-    pub fn new(index: HashMap<(String, String), usize>, values: Vec<Value>) -> Self {
-        debug_assert!(
-            index.len() == values.len(),
-            "Tuple index and values must have the same length"
-        );
-        Self { values, index }
+impl Message {
+    pub fn new(source: impl Into<String>, columns: Vec<(Arc<String>, Value)>) -> Self {
+        let mut values = Vec::with_capacity(columns.len());
+        let mut index = HashMap::with_capacity(columns.len());
+        for (name, value) in columns {
+            index.insert(name.clone(), values.len());
+            values.push(value);
+        }
+        Self {
+            source: source.into(),
+            values,
+            index,
+        }
     }
 
-    /// Return number of fields stored in this tuple.
-    pub fn len(&self) -> usize {
-        self.index.len()
+    pub fn source(&self) -> &str {
+        &self.source
     }
 
-    /// Check whether this tuple contains any fields.
-    pub fn is_empty(&self) -> bool {
-        self.index.is_empty()
-    }
-
-    pub fn column_pairs(&self) -> Vec<(String, String)> {
-        self.index.keys().cloned().collect()
-    }
-
-    pub fn entries(&self) -> impl Iterator<Item = (&(String, String), &Value)> {
+    pub fn entries(&self) -> impl Iterator<Item = (&Arc<String>, &Value)> {
         self.index
             .iter()
-            .map(|(key, idx)| (key, &self.values[*idx]))
+            .map(move |(name, idx)| (name, &self.values[*idx]))
     }
 
-    pub fn values(&self) -> &[Value] {
-        &self.values
-    }
-
-    pub fn value_by_name(&self, source_name: &str, column_name: &str) -> Option<&Value> {
+    pub fn value(&self, column: &str) -> Option<&Value> {
         self.index
-            .get(&(source_name.to_string(), column_name.to_string()))
+            .get(&Arc::new(column.to_string()))
             .and_then(|idx| self.values.get(*idx))
     }
 
-    pub fn value_by_column(&self, column_name: &str) -> Option<&Value> {
-        self.index
-            .iter()
-            .find(|((_, name), _)| name == column_name)
-            .and_then(|(_, idx)| self.values.get(*idx))
+    pub fn clone_arc(&self) -> Arc<Message> {
+        Arc::new(Message {
+            source: self.source.clone(),
+            columns: self.columns.clone(),
+            values: self.values.clone(),
+            index: self.index.clone(),
+        })
+    }
+}
+
+/// Derived columns without specific source binding.
+#[derive(Debug, Clone)]
+pub struct AffiliateRow {
+    keys: Vec<Arc<String>>,
+    values: Vec<Value>,
+    index: HashMap<Arc<String>, usize>,
+}
+
+impl AffiliateRow {
+    pub fn new(entries: Vec<(Arc<String>, Value)>) -> Self {
+        let mut values = Vec::with_capacity(entries.len());
+        let mut index = HashMap::with_capacity(entries.len());
+        for (key, value) in entries {
+            index.insert(key.clone(), values.len());
+            values.push(value);
+        }
+        Self { values, index }
     }
 
-    pub fn rewrite_sources(&mut self, source_name: &str) {
-        let mut new_index = HashMap::with_capacity(self.index.len());
-        let new_source = source_name.to_string();
-        for ((_, column), idx) in std::mem::take(&mut self.index) {
-            new_index.insert((new_source.clone(), column), idx);
+    pub fn entries(&self) -> impl Iterator<Item = (&Arc<String>, &Value)> {
+        self.index
+            .iter()
+            .map(move |(key, idx)| (key, &self.values[*idx]))
+    }
+
+    pub fn value(&self, key: &str) -> Option<&Value> {
+        self.index
+            .get(&Arc::new(key.to_string()))
+            .and_then(|idx| self.values.get(*idx))
+    }
+}
+
+/// Tuple combining source messages and optional derived columns.
+#[derive(Debug, Clone)]
+pub struct Tuple {
+    pub messages: Vec<Arc<Message>>,
+    pub affiliate: Option<AffiliateRow>,
+}
+
+impl Tuple {
+    pub fn new(messages: Vec<Arc<Message>>, affiliate: Option<AffiliateRow>) -> Self {
+        Self { messages, affiliate }
+    }
+
+    pub fn entries(&self) -> Vec<((&str, &str), &Value)> {
+        let mut out = Vec::new();
+        if let Some(aff) = &self.affiliate {
+            for (key, value) in aff.entries() {
+                out.push((("", key.as_str()), value));
+            }
         }
-        self.index = new_index;
+        for msg in &self.messages {
+            for (name, value) in msg.entries() {
+                out.push(((msg.source(), name.as_str()), value));
+            }
+        }
+        out
+    }
+
+    pub fn value_by_name(&self, source: &str, column: &str) -> Option<&Value> {
+        if source.is_empty() {
+            if let Some(aff) = &self.affiliate {
+                return aff.value(column);
+            }
+            return None;
+        }
+        self.messages
+            .iter()
+            .find(|msg| msg.source() == source)
+            .and_then(|msg| msg.value(column))
     }
 }
