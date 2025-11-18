@@ -1,6 +1,6 @@
 use crate::model::{CollectionError, Column, Tuple};
 use datatypes::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// RecordBatch represents a collection of rows stored purely as tuples.
 #[derive(Debug)]
@@ -132,12 +132,10 @@ fn columns_to_rows(columns: &[Column]) -> Result<Vec<Tuple>, CollectionError> {
         }
     }
 
-    let column_pairs: Vec<(String, String)> = columns
-        .iter()
-        .map(|column| (column.source_name.clone(), column.name.clone()))
-        .collect();
-
-    let index = Tuple::build_index(&column_pairs);
+    let mut index_template = HashMap::with_capacity(columns.len());
+    for (idx, column) in columns.iter().enumerate() {
+        index_template.insert((column.source_name.clone(), column.name.clone()), idx);
+    }
 
     let mut rows = Vec::with_capacity(num_rows);
     for row_idx in 0..num_rows {
@@ -145,7 +143,7 @@ fn columns_to_rows(columns: &[Column]) -> Result<Vec<Tuple>, CollectionError> {
         for column in columns {
             values.push(column.get(row_idx).cloned().unwrap_or(Value::Null));
         }
-        rows.push(Tuple::new(index.clone(), values));
+        rows.push(Tuple::new(index_template.clone(), values));
     }
     Ok(rows)
 }

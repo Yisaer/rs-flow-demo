@@ -102,12 +102,17 @@ async fn test_filter_processor_basic() {
     let batch = RecordBatch::from_rows(filtered_collection.rows().to_vec());
     let columns = batch.columns();
     assert_eq!(columns.len(), 2);
+    let column_a = columns
+        .iter()
+        .find(|col| col.name() == "a")
+        .expect("column a");
+    assert_eq!(column_a.values(), &vec![Value::Int64(20), Value::Int64(30)]);
+    let column_b = columns
+        .iter()
+        .find(|col| col.name() == "b")
+        .expect("column b");
     assert_eq!(
-        columns[0].values(),
-        &vec![Value::Int64(20), Value::Int64(30)]
-    );
-    assert_eq!(
-        columns[1].values(),
+        column_b.values(),
         &vec![Value::Int64(200), Value::Int64(300)]
     );
 }

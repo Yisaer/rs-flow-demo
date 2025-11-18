@@ -68,13 +68,4 @@ impl Tuple {
         }
         self.index = new_index;
     }
-
-    /// Build an index map from column descriptors, preserving deterministic order.
-    pub fn build_index(columns: &[(String, String)]) -> HashMap<(String, String), usize> {
-        let mut index = HashMap::with_capacity(columns.len());
-        for (idx, pair) in columns.iter().enumerate() {
-            index.insert(pair.clone(), idx);
-        }
-        index
-    }
 }

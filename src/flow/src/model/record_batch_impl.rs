@@ -3,6 +3,7 @@ use crate::expr::ScalarExpr;
 use crate::model::{Collection, CollectionError, Column, Tuple};
 use crate::planner::physical::PhysicalProjectField;
 use datatypes::Value;
+use std::collections::HashMap;
 
 impl Collection for RecordBatch {
     fn num_rows(&self) -> usize {
@@ -58,7 +59,7 @@ impl Collection for RecordBatch {
     ) -> Result<Box<dyn Collection>, CollectionError> {
         let mut projected_rows = Vec::with_capacity(self.num_rows());
         for tuple in self.rows() {
-            let mut projected_columns = Vec::new();
+            let mut projected_index = HashMap::new();
             let mut projected_values = Vec::new();
             for field in fields {
                 if let ScalarExpr::Wildcard { source_name } = &field.compiled_expr {
@@ -82,7 +83,8 @@ impl Collection for RecordBatch {
                     }
 
                     for ((src, name), value) in selected {
-                        projected_columns.push((src.clone(), name.clone()));
+                        let idx = projected_values.len();
+                        projected_index.insert((src.clone(), name.clone()), idx);
                         projected_values.push(value.clone());
                     }
                     continue;
@@ -98,12 +100,13 @@ impl Collection for RecordBatch {
                         ))
                     })?;
 
-                projected_columns.push(("".to_string(), field.field_name.clone()));
+                let key = ("".to_string(), field.field_name.clone());
+                let idx = projected_values.len();
+                projected_index.insert(key, idx);
                 projected_values.push(value);
             }
 
-            let index = Tuple::build_index(&projected_columns);
-            projected_rows.push(Tuple::new(index, projected_values));
+            projected_rows.push(Tuple::new(projected_index, projected_values));
         }
 
         Ok(Box::new(RecordBatch::from_rows(projected_rows)))

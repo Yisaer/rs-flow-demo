@@ -158,11 +158,9 @@ mod tests {
 
     #[test]
     fn json_encoder_encodes_tuple() {
-        let columns = vec![
-            ("orders".to_string(), "amount".to_string()),
-            ("orders".to_string(), "status".to_string()),
-        ];
-        let index = Tuple::build_index(&columns);
+        let mut index = std::collections::HashMap::new();
+        index.insert(("orders".to_string(), "amount".to_string()), 0);
+        index.insert(("orders".to_string(), "status".to_string()), 1);
         let tuple = Tuple::new(
             index,
             vec![Value::Int64(5), Value::String("ok".to_string())],
