@@ -77,7 +77,7 @@ pub fn rows_from_columns_simple(
                 let mut values_vec = Vec::with_capacity(cols.len());
                 for (col_name, values) in cols {
                     let value = values.get(row_idx).cloned().unwrap_or(Value::Null);
-                    keys.push(col_name.clone());
+                    keys.push(Arc::<str>::from(col_name.as_str()));
                     values_vec.push(value);
                 }
                 Arc::new(Message::new(

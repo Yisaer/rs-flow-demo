@@ -6,12 +6,12 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub struct Message {
     source: Arc<str>,
-    keys: Vec<String>,
+    keys: Vec<Arc<str>>,
     values: Vec<Value>,
 }
 
 impl Message {
-    pub fn new(source: impl Into<Arc<str>>, keys: Vec<String>, values: Vec<Value>) -> Self {
+    pub fn new(source: impl Into<Arc<str>>, keys: Vec<Arc<str>>, values: Vec<Value>) -> Self {
         debug_assert_eq!(
             keys.len(),
             values.len(),
@@ -32,13 +32,13 @@ impl Message {
         self.keys
             .iter()
             .zip(self.values.iter())
-            .map(|(k, v)| (k.as_str(), v))
+            .map(|(k, v)| (k.as_ref(), v))
     }
 
     pub fn value(&self, column: &str) -> Option<&Value> {
         self.keys
             .iter()
-            .position(|k| k == column)
+            .position(|k| k.as_ref() == column)
             .and_then(|idx| self.values.get(idx))
     }
 
@@ -155,7 +155,7 @@ impl Tuple {
             .as_ref()
             .map(|aff| aff.index.len())
             .unwrap_or(0);
-        let msg_len: usize = self.messages.iter().map(|msg| msg.keys.len()).sum();
+        let msg_len: usize = self.messages.iter().map(|msg| msg.values.len()).sum();
         aff_len + msg_len
     }
 

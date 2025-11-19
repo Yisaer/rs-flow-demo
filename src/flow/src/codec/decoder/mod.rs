@@ -35,13 +35,20 @@ pub trait RecordDecoder: Send + Sync + 'static {
 pub struct JsonDecoder {
     source_name: String,
     schema: Arc<Schema>,
+    schema_keys: Vec<Arc<str>>,
 }
 
 impl JsonDecoder {
     pub fn new(source_name: impl Into<String>, schema: Arc<Schema>) -> Self {
+        let schema_keys = schema
+            .column_schemas()
+            .iter()
+            .map(|col| Arc::<str>::from(col.name.as_str()))
+            .collect();
         Self {
             source_name: source_name.into(),
             schema,
+            schema_keys,
         }
     }
 
@@ -139,19 +146,18 @@ impl JsonDecoder {
     ) -> Result<Vec<Tuple>, CodecError> {
         let mut tuples = Vec::with_capacity(rows.len());
         for mut row in rows {
-            let mut keys = Vec::with_capacity(self.schema.column_schemas().len() + row.len());
+            let mut keys = Vec::with_capacity(self.schema_keys.len() + row.len());
             let mut values = Vec::with_capacity(keys.capacity());
-            for column in self.schema.column_schemas() {
-                let name = column.name.clone();
+            for (idx, column) in self.schema.column_schemas().iter().enumerate() {
                 let value = row
-                    .remove(&name)
+                    .remove(&column.name)
                     .map(|json| json_to_value(&json))
                     .unwrap_or(Value::Null);
-                keys.push(name);
+                keys.push(self.schema_keys[idx].clone());
                 values.push(value);
             }
             for (key, value) in row {
-                keys.push(key);
+                keys.push(Arc::<str>::from(key.as_str()));
                 values.push(json_to_value(&value));
             }
             let message = Arc::new(Message::new(
