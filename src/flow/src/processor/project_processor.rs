@@ -84,6 +84,7 @@ impl Processor for ProjectProcessor {
         let output = self.output.clone();
         let control_output = self.control_output.clone();
         let fields = self.physical_project.fields.clone();
+        println!("[ProjectProcessor:{id}] starting");
 
         tokio::spawn(async move {
             loop {
@@ -104,6 +105,7 @@ impl Processor for ProjectProcessor {
                             let _ = control_output.send(control_data);
                             if is_terminal {
                                 println!("[ProjectProcessor:{id}] received StreamEnd (control)");
+                                println!("[ProjectProcessor:{id}] stopped");
                                 return Ok(());
                             }
                             continue;
@@ -138,16 +140,22 @@ impl Processor for ProjectProcessor {
                                     .map_err(|_| ProcessorError::ChannelClosed)?;
                                 if is_terminal {
                                     println!("[ProjectProcessor:{id}] received StreamEnd (data)");
+                                    println!("[ProjectProcessor:{id}] stopped");
                                     return Ok(());
                                 }
                             }
                             Some(Err(BroadcastStreamRecvError::Lagged(skipped))) => {
-                                return Err(ProcessorError::ProcessingError(format!(
+                                let err = ProcessorError::ProcessingError(format!(
                                     "ProjectProcessor input lagged by {} messages",
                                     skipped
-                                )))
+                                ));
+                                println!("[ProjectProcessor:{id}] stopped with error: {}", err);
+                                return Err(err);
                             }
-                            None => return Ok(()),
+                            None => {
+                                println!("[ProjectProcessor:{id}] stopped");
+                                return Ok(());
+                            }
                         }
                     }
                 }

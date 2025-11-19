@@ -166,6 +166,7 @@ impl Processor for SinkProcessor {
 
         let mut connectors = std::mem::take(&mut self.connectors);
         let processor_id = self.id.clone();
+        println!("[SinkProcessor:{processor_id}] starting");
 
         tokio::spawn(async move {
             for binding in connectors.iter_mut() {
@@ -190,6 +191,7 @@ impl Processor for SinkProcessor {
                             if is_terminal {
                                 println!("[SinkProcessor:{processor_id}] received StreamEnd (control)");
                                 Self::handle_terminal(&mut connectors).await?;
+                                println!("[SinkProcessor:{processor_id}] stopped");
                                 return Ok(());
                             }
                             continue;
@@ -231,17 +233,21 @@ impl Processor for SinkProcessor {
                                 if is_terminal {
                                     println!("[SinkProcessor:{processor_id}] received StreamEnd (data)");
                                     Self::handle_terminal(&mut connectors).await?;
+                                    println!("[SinkProcessor:{processor_id}] stopped");
                                     return Ok(());
                                 }
                             }
                             Some(Err(BroadcastStreamRecvError::Lagged(skipped))) => {
-                                return Err(ProcessorError::ProcessingError(format!(
+                                let err = ProcessorError::ProcessingError(format!(
                                     "SinkProcessor input lagged by {} messages",
                                     skipped
-                                )))
+                                ));
+                                println!("[SinkProcessor:{processor_id}] stopped with error: {}", err);
+                                return Err(err);
                             }
                             None => {
                                 Self::handle_terminal(&mut connectors).await?;
+                                println!("[SinkProcessor:{processor_id}] stopped");
                                 return Ok(());
                             }
                         }

@@ -84,6 +84,7 @@ impl Processor for ControlSourceProcessor {
         let output = self.output.clone();
         let control_output = self.control_output.clone();
         let processor_id = self.id.clone();
+        println!("[ControlSourceProcessor:{processor_id}] starting");
 
         tokio::spawn(async move {
             let input = match input_result {
@@ -96,10 +97,15 @@ impl Processor for ControlSourceProcessor {
                 let data = match item {
                     Ok(data) => data,
                     Err(BroadcastStreamRecvError::Lagged(skipped)) => {
-                        return Err(ProcessorError::ProcessingError(format!(
+                        let err = ProcessorError::ProcessingError(format!(
                             "Control source input lagged by {} messages",
                             skipped
-                        )))
+                        ));
+                        println!(
+                            "[ControlSourceProcessor:{processor_id}] stopped with error: {}",
+                            err
+                        );
+                        return Err(err);
                     }
                 };
 
@@ -130,6 +136,7 @@ impl Processor for ControlSourceProcessor {
             }
 
             // Input closed without explicit StreamEnd, propagate shutdown.
+            println!("[ControlSourceProcessor:{processor_id}] stopping (input closed)");
             output
                 .send(StreamData::stream_end())
                 .map_err(|_| ProcessorError::ChannelClosed)?;
