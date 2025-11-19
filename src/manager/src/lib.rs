@@ -339,6 +339,7 @@ fn attach_mqtt_sources(
     for processor in pipeline.middle_processors.iter_mut() {
         if let PlanProcessor::DataSource(ds) = processor {
             let source_id = ds.id().to_string();
+            let schema = ds.schema();
             let config = MqttSourceConfig::new(
                 source_id.clone(),
                 broker_url.to_string(),
@@ -347,7 +348,7 @@ fn attach_mqtt_sources(
             );
             let connector =
                 MqttSourceConnector::new(format!("{source_id}_source_connector"), config);
-            let decoder = Arc::new(JsonDecoder::new(source_id));
+            let decoder = Arc::new(JsonDecoder::new(source_id, schema));
             ds.add_connector(Box::new(connector), decoder);
             attached = true;
         }

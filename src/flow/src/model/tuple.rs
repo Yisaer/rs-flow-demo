@@ -41,6 +41,10 @@ impl Message {
             .position(|k| k == column)
             .and_then(|idx| self.values.get(idx))
     }
+
+    pub fn value_by_index(&self, index: usize) -> Option<&Value> {
+        self.values.get(index)
+    }
 }
 
 /// Derived columns without specific source binding.
@@ -133,6 +137,16 @@ impl Tuple {
             .iter()
             .find(|msg| msg.source() == source)
             .and_then(|msg| msg.value(column))
+    }
+
+    pub fn value_by_index(&self, source: &str, index: usize) -> Option<&Value> {
+        if source.is_empty() {
+            return None;
+        }
+        self.messages
+            .iter()
+            .find(|msg| msg.source() == source)
+            .and_then(|msg| msg.value_by_index(index))
     }
 
     pub fn len(&self) -> usize {

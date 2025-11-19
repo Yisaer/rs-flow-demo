@@ -7,6 +7,7 @@ use crate::codec::RecordDecoder;
 use crate::connector::{ConnectorEvent, SourceConnector};
 use crate::processor::base::{fan_in_streams, DEFAULT_CHANNEL_CAPACITY};
 use crate::processor::{Processor, ProcessorError, StreamData, StreamError};
+use datatypes::Schema;
 use futures::stream::StreamExt;
 use once_cell::sync::Lazy;
 use prometheus::{register_int_counter_vec, IntCounterVec};
@@ -23,6 +24,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 pub struct DataSourceProcessor {
     /// Processor identifier
     source_name: String,
+    schema: Arc<Schema>,
     /// Input channels for receiving control signals
     inputs: Vec<broadcast::Receiver<StreamData>>,
     control_inputs: Vec<broadcast::Receiver<StreamData>>,
@@ -58,11 +60,12 @@ struct ConnectorBinding {
 
 impl DataSourceProcessor {
     /// Create a new DataSourceProcessor from PhysicalDatasource
-    pub fn new(source_name: impl Into<String>) -> Self {
+    pub fn new(source_name: impl Into<String>, schema: Arc<Schema>) -> Self {
         let (output, _) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
         let (control_output, _) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
         Self {
             source_name: source_name.into(),
+            schema,
             inputs: Vec::new(),
             control_inputs: Vec::new(),
             output,
@@ -236,5 +239,11 @@ impl Processor for DataSourceProcessor {
 
     fn add_control_input(&mut self, receiver: broadcast::Receiver<StreamData>) {
         self.control_inputs.push(receiver);
+    }
+}
+
+impl DataSourceProcessor {
+    pub fn schema(&self) -> Arc<Schema> {
+        Arc::clone(&self.schema)
     }
 }

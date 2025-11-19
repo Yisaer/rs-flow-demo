@@ -1,7 +1,7 @@
 //! Decoder abstractions for turning raw bytes into RecordBatch collections.
 
 use crate::model::{CollectionError, Message, RecordBatch, Tuple};
-use datatypes::{ConcreteDatatype, ListValue, StructField, StructType, StructValue, Value};
+use datatypes::{ConcreteDatatype, ListValue, Schema, StructField, StructType, StructValue, Value};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::sync::Arc;
 
@@ -34,12 +34,14 @@ pub trait RecordDecoder: Send + Sync + 'static {
 /// Decoder that converts JSON documents (object or array) into a RecordBatch.
 pub struct JsonDecoder {
     source_name: String,
+    schema: Arc<Schema>,
 }
 
 impl JsonDecoder {
-    pub fn new(source_name: impl Into<String>) -> Self {
+    pub fn new(source_name: impl Into<String>, schema: Arc<Schema>) -> Self {
         Self {
             source_name: source_name.into(),
+            schema,
         }
     }
 
@@ -136,9 +138,18 @@ impl JsonDecoder {
         rows: Vec<JsonMap<String, JsonValue>>,
     ) -> Result<Vec<Tuple>, CodecError> {
         let mut tuples = Vec::with_capacity(rows.len());
-        for row in rows {
-            let mut keys = Vec::with_capacity(row.len());
-            let mut values = Vec::with_capacity(row.len());
+        for mut row in rows {
+            let mut keys = Vec::with_capacity(self.schema.column_schemas().len() + row.len());
+            let mut values = Vec::with_capacity(keys.capacity());
+            for column in self.schema.column_schemas() {
+                let name = column.name.clone();
+                let value = row
+                    .remove(&name)
+                    .map(|json| json_to_value(&json))
+                    .unwrap_or(Value::Null);
+                keys.push(name);
+                values.push(value);
+            }
             for (key, value) in row {
                 keys.push(key);
                 values.push(json_to_value(&value));
@@ -210,11 +221,23 @@ fn json_to_value(value: &JsonValue) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datatypes::Value;
+    use datatypes::{ColumnSchema, ConcreteDatatype, Int64Type, Schema, StringType, Value};
 
     #[test]
     fn json_decoder_decodes_single_tuple() {
-        let decoder = JsonDecoder::new("orders");
+        let schema = Arc::new(Schema::new(vec![
+            ColumnSchema::new(
+                "orders".to_string(),
+                "amount".to_string(),
+                ConcreteDatatype::Int64(Int64Type),
+            ),
+            ColumnSchema::new(
+                "orders".to_string(),
+                "status".to_string(),
+                ConcreteDatatype::String(StringType),
+            ),
+        ]));
+        let decoder = JsonDecoder::new("orders", schema);
         let payload = br#"{"amount":10,"status":"ok"}"#.as_ref();
         let tuple = decoder.decode_tuple(payload).expect("decode tuple");
 
@@ -243,7 +266,12 @@ mod tests {
 
     #[test]
     fn json_decoder_rejects_multiple_rows_for_tuple() {
-        let decoder = JsonDecoder::new("orders");
+        let schema = Arc::new(Schema::new(vec![ColumnSchema::new(
+            "orders".to_string(),
+            "amount".to_string(),
+            ConcreteDatatype::Int64(Int64Type),
+        )]));
+        let decoder = JsonDecoder::new("orders", schema);
         let payload = br#"[{"amount":10},{"amount":20}]"#.as_ref();
         let err = decoder
             .decode_tuple(payload)

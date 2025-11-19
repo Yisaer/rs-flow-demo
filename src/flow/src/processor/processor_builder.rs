@@ -245,7 +245,7 @@ pub fn create_processor_from_plan_node(
 ) -> Result<PlanProcessor, ProcessorError> {
     if let Some(ds) = plan.as_any().downcast_ref::<PhysicalDataSource>() {
         let processor_id = ds.source_name();
-        let processor = DataSourceProcessor::new(processor_id);
+        let processor = DataSourceProcessor::new(processor_id, ds.schema());
         Ok(PlanProcessor::DataSource(processor))
     } else if let Some(proj) = plan.as_any().downcast_ref::<PhysicalProject>() {
         let processor_id = format!("project_{}", _idx);
@@ -524,15 +524,17 @@ mod tests {
     use super::*;
     use crate::expr::ScalarExpr;
     use crate::planner::physical::{PhysicalDataSource, PhysicalProject, PhysicalProjectField};
-    use datatypes::{ConcreteDatatype, Value};
+    use datatypes::{ConcreteDatatype, Schema, Value};
     use sqlparser::ast::{Expr, Value as SqlValue};
     use std::sync::Arc;
 
     #[test]
     fn test_create_processor_from_physical_project() {
         // Create a simple data source
-        let data_source: Arc<dyn crate::planner::physical::PhysicalPlan> =
-            Arc::new(PhysicalDataSource::new("test_source".to_string(), 0));
+        let schema = Arc::new(Schema::new(vec![]));
+        let data_source: Arc<dyn crate::planner::physical::PhysicalPlan> = Arc::new(
+            PhysicalDataSource::new("test_source".to_string(), None, schema, 0),
+        );
 
         // Create a projection field
         let project_field = PhysicalProjectField::new(
