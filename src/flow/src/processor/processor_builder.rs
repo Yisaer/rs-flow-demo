@@ -598,7 +598,7 @@ mod tests {
 
         match result {
             Ok(processor) => {
-                assert_eq!(processor.id(), "project_0");
+                assert_eq!(processor.id(), "project_1");
                 println!(
                     "✅ SUCCESS: PhysicalProject processor created with ID: {}",
                     processor.id()

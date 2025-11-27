@@ -124,12 +124,6 @@ impl SharedStreamRegistry {
         let guard = self.streams.read().await;
         guard.contains_key(name)
     }
-
-    /// Synchronous check whether a stream is registered. Useful for synchronous contexts.
-    pub fn is_registered_blocking(&self, name: &str) -> bool {
-        let guard = self.streams.blocking_read();
-        guard.contains_key(name)
-    }
 }
 
 /// Errors that can occur while operating a shared stream.

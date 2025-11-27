@@ -60,7 +60,7 @@ fn build_schema_binding(
         let schema = catalog
             .get(&source.name)
             .ok_or_else(|| format!("schema for source '{}' not found", source.name))?;
-        let kind = if registry.is_registered_blocking(&source.name) {
+        let kind = if futures::executor::block_on(registry.is_registered(&source.name)) {
             SourceBindingKind::Shared
         } else {
             SourceBindingKind::Regular
