@@ -1,5 +1,11 @@
+use crate::pipeline::AppState;
 use crate::{DEFAULT_BROKER_URL, MQTT_QOS, SOURCE_TOPIC};
-use axum::{Json, extract::Path, http::StatusCode, response::IntoResponse};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+};
 use flow::catalog::global_catalog;
 use flow::shared_stream::{
     SharedStreamConfig, SharedStreamError, SharedStreamInfo, SharedStreamStatus,
@@ -171,7 +177,30 @@ pub async fn list_streams() -> impl IntoResponse {
     Json(payload)
 }
 
-pub async fn delete_stream_handler(Path(name): Path<String>) -> impl IntoResponse {
+pub async fn delete_stream_handler(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+
+    let pipelines_using_stream = {
+        let pipelines = state.pipelines.lock().await;
+        pipelines
+            .iter()
+            .filter(|(_, entry)| entry.streams.iter().any(|stream| stream == &name))
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<String>>()
+    };
+    if !pipelines_using_stream.is_empty() {
+        return (
+            StatusCode::CONFLICT,
+            format!(
+                "stream {name} still referenced by pipelines: {}",
+                pipelines_using_stream.join(", ")
+            ),
+        )
+            .into_response();
+    }
+
     match shared_stream_registry().drop_stream(&name).await {
         Ok(_) | Err(SharedStreamError::NotFound(_)) => {}
         Err(SharedStreamError::InUse(consumers)) => {
