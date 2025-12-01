@@ -243,17 +243,18 @@ fn attach_mqtt_sources(
     let mut attached = false;
     for processor in pipeline.middle_processors.iter_mut() {
         if let PlanProcessor::DataSource(ds) = processor {
-            let source_id = ds.id().to_string();
+            let processor_id = ds.id().to_string();
+            let stream_name = ds.stream_name().to_string();
             let schema = ds.schema();
             let config = MqttSourceConfig::new(
-                source_id.clone(),
+                processor_id.clone(),
                 broker_url.to_string(),
                 topic.to_string(),
                 qos,
             );
             let connector =
-                MqttSourceConnector::new(format!("{source_id}_source_connector"), config);
-            let decoder = Arc::new(JsonDecoder::new(source_id, schema));
+                MqttSourceConnector::new(format!("{processor_id}_source_connector"), config);
+            let decoder = Arc::new(JsonDecoder::new(stream_name, schema));
             ds.add_connector(Box::new(connector), decoder);
             attached = true;
         }

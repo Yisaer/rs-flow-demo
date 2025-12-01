@@ -366,4 +366,8 @@ impl DataSourceProcessor {
     pub fn schema(&self) -> Arc<Schema> {
         Arc::clone(&self.schema)
     }
+
+    pub fn stream_name(&self) -> &str {
+        &self.source_name
+    }
 }
