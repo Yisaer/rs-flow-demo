@@ -33,20 +33,20 @@ pub trait RecordDecoder: Send + Sync + 'static {
 
 /// Decoder that converts JSON documents (object or array) into a RecordBatch.
 pub struct JsonDecoder {
-    source_name: String,
+    stream_name: String,
     schema: Arc<Schema>,
     schema_keys: Vec<Arc<str>>,
 }
 
 impl JsonDecoder {
-    pub fn new(source_name: impl Into<String>, schema: Arc<Schema>) -> Self {
+    pub fn new(stream_name: impl Into<String>, schema: Arc<Schema>) -> Self {
         let schema_keys = schema
             .column_schemas()
             .iter()
             .map(|col| Arc::<str>::from(col.name.as_str()))
             .collect();
         Self {
-            source_name: source_name.into(),
+            stream_name: stream_name.into(),
             schema,
             schema_keys,
         }
@@ -161,7 +161,7 @@ impl JsonDecoder {
                 values.push(json_to_value(&value));
             }
             let message = Arc::new(Message::new(
-                Arc::<str>::from(self.source_name.as_str()),
+                Arc::<str>::from(self.stream_name.as_str()),
                 keys,
                 values,
             ));
