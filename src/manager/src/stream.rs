@@ -194,14 +194,13 @@ pub async fn delete_stream_handler(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> impl IntoResponse {
-    let pipelines_using_stream = {
-        let pipelines = state.pipelines.lock().await;
-        pipelines
-            .iter()
-            .filter(|(_, entry)| entry.streams.iter().any(|stream| stream == &name))
-            .map(|(id, _)| id.clone())
-            .collect::<Vec<String>>()
-    };
+    let pipelines_using_stream = state
+        .pipeline_manager
+        .list()
+        .into_iter()
+        .filter(|snapshot| snapshot.streams.iter().any(|stream| stream == &name))
+        .map(|snapshot| snapshot.definition.id().to_string())
+        .collect::<Vec<_>>();
     if !pipelines_using_stream.is_empty() {
         return (
             StatusCode::CONFLICT,

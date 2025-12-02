@@ -27,8 +27,8 @@ pub use expr::{
 };
 pub use model::{Collection, RecordBatch};
 pub use pipeline::{
-    MqttSinkProps, PipelineDefinition, PipelineError, PipelineManager, SinkDefinition, SinkProps,
-    SinkType,
+    MqttSinkProps, PipelineDefinition, PipelineError, PipelineManager, PipelineSnapshot,
+    PipelineStatus, SinkDefinition, SinkProps, SinkType,
 };
 pub use planner::create_physical_plan;
 pub use planner::logical::{
