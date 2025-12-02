@@ -146,8 +146,16 @@ impl ProcessorPipeline {
         for sink in &mut self.sink_processors {
             self.handles.push(sink.start());
         }
-        for processor in self.middle_processors.iter_mut().rev() {
-            self.handles.push(processor.start());
+        let len = self.middle_processors.len();
+        for idx in (0..len).rev() {
+            if !matches!(self.middle_processors[idx], PlanProcessor::DataSource(_)) {
+                self.handles.push(self.middle_processors[idx].start());
+            }
+        }
+        for idx in (0..len).rev() {
+            if matches!(self.middle_processors[idx], PlanProcessor::DataSource(_)) {
+                self.handles.push(self.middle_processors[idx].start());
+            }
         }
         self.handles.push(self.control_source.start());
         if let Some(buffer) = self.data_input_buffer.take() {
