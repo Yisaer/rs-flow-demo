@@ -9,7 +9,7 @@ pub mod physical_filter;
 pub mod physical_project;
 pub mod physical_shared_stream;
 pub mod physical_streaming_encoder;
-pub mod physical_tail;
+pub mod physical_result_collect;
 
 pub use base_physical::BasePhysicalPlan;
 pub use physical_batch::PhysicalBatch;
@@ -20,7 +20,7 @@ pub use physical_filter::PhysicalFilter;
 pub use physical_project::{PhysicalProject, PhysicalProjectField};
 pub use physical_shared_stream::PhysicalSharedStream;
 pub use physical_streaming_encoder::PhysicalStreamingEncoder;
-pub use physical_tail::PhysicalTail;
+pub use physical_result_collect::PhysicalResultCollect;
 
 /// Enum describing all supported physical execution nodes
 #[derive(Debug, Clone)]
@@ -33,7 +33,7 @@ pub enum PhysicalPlan {
     DataSink(PhysicalDataSink),
     Encoder(PhysicalEncoder),
     StreamingEncoder(PhysicalStreamingEncoder),
-    Tail(PhysicalTail),
+    ResultCollect(PhysicalResultCollect),
 }
 
 impl PhysicalPlan {
@@ -48,7 +48,7 @@ impl PhysicalPlan {
             PhysicalPlan::DataSink(plan) => plan.base.children(),
             PhysicalPlan::Encoder(plan) => plan.base.children(),
             PhysicalPlan::StreamingEncoder(plan) => plan.base.children(),
-            PhysicalPlan::Tail(plan) => plan.base.children(),
+            PhysicalPlan::ResultCollect(plan) => plan.base.children(),
         }
     }
 
@@ -63,7 +63,7 @@ impl PhysicalPlan {
             PhysicalPlan::DataSink(_) => "PhysicalDataSink",
             PhysicalPlan::Encoder(_) => "PhysicalEncoder",
             PhysicalPlan::StreamingEncoder(_) => "PhysicalStreamingEncoder",
-            PhysicalPlan::Tail(_) => "PhysicalTail",
+            PhysicalPlan::ResultCollect(_) => "PhysicalResultCollect",
         }
     }
 
@@ -78,7 +78,7 @@ impl PhysicalPlan {
             PhysicalPlan::DataSink(plan) => plan.base.index(),
             PhysicalPlan::Encoder(plan) => plan.base.index(),
             PhysicalPlan::StreamingEncoder(plan) => plan.base.index(),
-            PhysicalPlan::Tail(plan) => plan.base.index(),
+            PhysicalPlan::ResultCollect(plan) => plan.base.index(),
         }
     }
 }

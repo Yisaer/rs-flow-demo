@@ -10,8 +10,8 @@ use crate::planner::logical::{
 use crate::planner::physical::physical_project::PhysicalProjectField;
 use crate::planner::physical::{
     PhysicalBatch, PhysicalDataSink, PhysicalDataSource, PhysicalEncoder, PhysicalFilter,
-    PhysicalPlan, PhysicalProject, PhysicalSharedStream, PhysicalSinkConnector,
-    PhysicalStreamingEncoder, PhysicalTail,
+    PhysicalPlan, PhysicalProject, PhysicalResultCollect, PhysicalSharedStream, PhysicalSinkConnector,
+    PhysicalStreamingEncoder,
 };
 use crate::planner::sink::{PipelineSink, PipelineSinkConnector};
 use std::sync::Arc;
@@ -46,32 +46,30 @@ pub fn create_physical_plan(
             logical_plan.get_plan_index(),
             bindings,
         ),
-        LogicalPlan::Tail(logical_tail) => create_physical_tail(
-            logical_tail,
-            &logical_plan,
-            logical_plan.get_plan_index(),
-            bindings,
-        ),
+        LogicalPlan::Tail(_logical_tail) => {
+            // TailPlan is no longer used in new design, but handle it for backward compatibility
+            // Convert to multiple DataSink nodes under a ResultCollect
+            create_physical_result_collect_from_tail(&logical_plan, logical_plan.get_plan_index(), bindings)
+        }
     }
 }
 
-/// Create a PhysicalTail from a TailPlan
-fn create_physical_tail(
-    logical_tail: &crate::planner::logical::TailPlan,
-    _logical_plan: &Arc<LogicalPlan>,
+/// Create a PhysicalResultCollect from a TailPlan for backward compatibility
+fn create_physical_result_collect_from_tail(
+    logical_plan: &Arc<LogicalPlan>,
     index: i64,
     bindings: &SchemaBinding,
 ) -> Result<Arc<PhysicalPlan>, String> {
     // Convert all sink children to physical plans
     let mut physical_children = Vec::new();
-    for child in logical_tail.base.children() {
+    for child in logical_plan.children() {
         let physical_child = create_physical_plan(child.clone(), bindings)?;
         physical_children.push(physical_child);
     }
 
-    // Create PhysicalTail to hold the physical sink children
-    let physical_tail = PhysicalTail::new(physical_children, index);
-    Ok(Arc::new(PhysicalPlan::Tail(physical_tail)))
+    // Create PhysicalResultCollect to hold the physical sink children
+    let physical_result_collect = PhysicalResultCollect::new(physical_children, index);
+    Ok(Arc::new(PhysicalPlan::ResultCollect(physical_result_collect)))
 }
 
 /// Create a PhysicalDataSource from a LogicalDataSource
@@ -193,19 +191,44 @@ fn create_physical_sink_node(
     let mut connectors = Vec::new();
     let mut encoder_children = Vec::new();
     let mut next_index = index + 1;
+    
+    // Check if any sink needs forward_to_result
+    let needs_result_collect = sinks.iter().any(|sink| sink.forward_to_result);
+    
     for sink in sinks {
         let (mut sink_encoders, mut sink_connectors) =
             build_sink_encoders_for_sink(sink, &input_child, &mut next_index)?;
         encoder_children.append(&mut sink_encoders);
         connectors.append(&mut sink_connectors);
     }
+    
     if connectors.is_empty() {
         return Err("DataSink plan must define at least one connector".to_string());
     }
-    let child = encoder_children.remove(0);
-    let connector = connectors.remove(0);
-    let physical_sink = PhysicalDataSink::new(child, index, connector);
-    Ok(Arc::new(PhysicalPlan::DataSink(physical_sink)))
+    
+    if needs_result_collect {
+        // Create ResultCollect node to gather outputs from all sinks
+        let mut sink_nodes = Vec::new();
+
+        // Create individual sink nodes for each connector
+        for (encoder_child, connector) in encoder_children.into_iter().zip(connectors.into_iter()) {
+            let sink_index = next_index;
+            next_index += 1;
+            let physical_sink = PhysicalDataSink::new(encoder_child, sink_index, connector);
+            sink_nodes.push(Arc::new(PhysicalPlan::DataSink(physical_sink)));
+        }
+
+        // Create ResultCollect node with the sink nodes as children
+        let result_collect_index = next_index;
+        let result_collect = PhysicalResultCollect::new(sink_nodes, result_collect_index);
+        Ok(Arc::new(PhysicalPlan::ResultCollect(result_collect)))
+    } else {
+        // Single sink case without result forwarding
+        let child = encoder_children.remove(0);
+        let connector = connectors.remove(0);
+        let physical_sink = PhysicalDataSink::new(child, index, connector);
+        Ok(Arc::new(PhysicalPlan::DataSink(physical_sink)))
+    }
 }
 
 fn build_sink_encoders_for_sink(
