@@ -13,7 +13,8 @@ pub use catalog::{
     StreamType,
 };
 pub use codec::{
-    CodecError, CollectionEncoder, EncodeError, JsonDecoder, JsonEncoder, RecordDecoder,
+    CodecError, CollectionEncoder, CollectionEncoderStream, EncodeError, JsonDecoder, JsonEncoder,
+    RecordDecoder,
 };
 pub use datatypes::{
     BooleanType, ColumnSchema, ConcreteDatatype, Float32Type, Float64Type, Int16Type, Int32Type,
