@@ -7,7 +7,7 @@ use crate::codec::{CollectionEncoder, JsonEncoder};
 use crate::connector::sink::mqtt::MqttSinkConnector;
 use crate::connector::sink::nop::NopSinkConnector;
 use crate::connector::sink::SinkConnector;
-use crate::planner::physical::{PhysicalPlan, PhysicalSinkConnector};
+use crate::planner::physical::{PhysicalPlan};
 use crate::planner::sink::{SinkConnectorConfig, SinkEncoderConfig};
 use crate::processor::{
     BatchProcessor, ControlSignal, ControlSourceProcessor, DataSourceProcessor, EncoderProcessor,
@@ -449,15 +449,6 @@ impl ProcessorMap {
     fn mark_visited(&mut self, plan_name: &str) -> bool {
         self.visited.insert(plan_name.to_string())
     }
-
-    fn find_result_collect_plan_name(&self) -> Option<String> {
-        for (plan_name, processor) in &self.processors {
-            if matches!(processor, PlanProcessor::ResultCollect(_)) {
-                return Some(plan_name.clone());
-            }
-        }
-        None
-    }
 }
 
 /// Recursively build processors from PhysicalPlan tree
@@ -491,32 +482,54 @@ fn build_processors_recursive(
 
 /// Collect leaf node indices from PhysicalPlan tree
 fn collect_leaf_indices(plan: Arc<PhysicalPlan>) -> Vec<i64> {
-    let mut leaf_indices = Vec::new();
-
-    if plan.children().is_empty() {
-        leaf_indices.push(plan.get_plan_index());
-    } else {
-        for child in plan.children() {
-            leaf_indices.extend(collect_leaf_indices(Arc::clone(child)));
+    use std::collections::HashSet;
+    fn helper(
+        plan: Arc<PhysicalPlan>,
+        leaves: &mut HashSet<i64>,
+        visited: &mut HashSet<i64>,
+    ) {
+        let index = plan.get_plan_index();
+        if !visited.insert(index) {
+            return;
+        }
+        if plan.children().is_empty() {
+            leaves.insert(index);
+        } else {
+            for child in plan.children() {
+                helper(Arc::clone(child), leaves, visited);
+            }
         }
     }
 
-    leaf_indices
+    let mut leaves = HashSet::new();
+    let mut visited = HashSet::new();
+    helper(plan, &mut leaves, &mut visited);
+    leaves.into_iter().collect()
 }
 
 /// Collect parent-child relationships from PhysicalPlan tree
 fn collect_parent_child_relations(plan: Arc<PhysicalPlan>) -> Vec<(i64, i64)> {
-    let mut relations = Vec::new();
-    let parent_index = plan.get_plan_index();
-
-    for child in plan.children() {
-        let child_index = child.get_plan_index();
-        relations.push((parent_index, child_index));
-        // Recursively collect from children
-        relations.extend(collect_parent_child_relations(Arc::clone(child)));
+    use std::collections::HashSet;
+    fn helper(
+        plan: Arc<PhysicalPlan>,
+        relations: &mut HashSet<(i64, i64)>,
+        visited: &mut HashSet<i64>,
+    ) {
+        let parent_index = plan.get_plan_index();
+        if !visited.insert(parent_index) {
+            return;
+        }
+        for child in plan.children() {
+            let child_index = child.get_plan_index();
+            relations.insert((parent_index, child_index));
+            helper(Arc::clone(child), relations, visited);
+        }
     }
 
-    relations
+    let mut relations = HashSet::new();
+    let mut visited = HashSet::new();
+    helper(plan, &mut relations, &mut visited);
+    relations.into_iter().collect()
 }
 
 /// Build a mapping from plan index to plan name for all nodes in the PhysicalPlan tree
@@ -568,21 +581,21 @@ fn connect_processors(
     let relations = collect_parent_child_relations(Arc::clone(&physical_plan));
     
     // Debug: Print connection relationships
-    println!("=== Processor Connection Relationships ===");
-    let mut relation_counts: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
-    for (parent_idx, child_idx) in &relations {
-        *relation_counts.entry(*child_idx).or_insert(0) += 1;
-        if let (Some(child_name), Some(parent_name)) = (index_to_name_map.get(child_idx), index_to_name_map.get(parent_idx)) {
-            println!("  {} (index: {}) -> {} (index: {})", child_name, child_idx, parent_name, parent_idx);
-        }
-    }
-    println!("Child processor subscription counts:");
-    for (child_idx, count) in relation_counts {
-        if let Some(child_name) = index_to_name_map.get(&child_idx) {
-            println!("  {} (index: {}): {} parent(s)", child_name, child_idx, count);
-        }
-    }
-    println!("=========================================");
+    // println!("=== Processor Connection Relationships ===");
+    // let mut relation_counts: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
+    // for (parent_idx, child_idx) in &relations {
+    //     *relation_counts.entry(*child_idx).or_insert(0) += 1;
+    //     if let (Some(child_name), Some(parent_name)) = (index_to_name_map.get(child_idx), index_to_name_map.get(parent_idx)) {
+    //         println!("  {} (index: {}) -> {} (index: {})", child_name, child_idx, parent_name, parent_idx);
+    //     }
+    // }
+    // println!("Child processor subscription counts:");
+    // for (child_idx, count) in relation_counts {
+    //     if let Some(child_name) = index_to_name_map.get(&child_idx) {
+    //         println!("  {} (index: {}): {} parent(s)", child_name, child_idx, count);
+    //     }
+    // }
+    // println!("=========================================");
     
     for (parent_index, child_index) in relations {
         if let (Some(child_plan_name), Some(parent_plan_name)) = (
@@ -683,25 +696,6 @@ pub fn create_processor_pipeline(
         handles: Vec::new(),
         pipeline_id,
     })
-}
-
-fn build_sink_components(
-    connectors: &[PhysicalSinkConnector],
-) -> Result<Vec<(i64, SinkProcessor)>, ProcessorError> {
-    let mut components = Vec::new();
-    for connector in connectors {
-        let mut processor =
-            SinkProcessor::new(format!("{}_{}", connector.sink_id, connector.connector_id));
-        if connector.forward_to_result {
-            processor.enable_result_forwarding();
-        } else {
-            processor.disable_result_forwarding();
-        }
-        let boxed_connector = instantiate_connector(&connector.connector_id, &connector.connector)?;
-        processor.add_connector(boxed_connector);
-        components.push((connector.encoder_plan_index, processor));
-    }
-    Ok(components)
 }
 
 fn instantiate_encoder(cfg: &SinkEncoderConfig) -> Arc<dyn CollectionEncoder> {
