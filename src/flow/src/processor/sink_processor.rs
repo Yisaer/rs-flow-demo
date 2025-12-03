@@ -176,21 +176,9 @@ impl Processor for SinkProcessor {
                 tokio::select! {
                     biased;
                     control_item = control_streams.next(), if control_active => {
-                        if let Some(result) = control_item {
-                            let control_signal = match result {
-                                Ok(signal) => signal,
-                                Err(BroadcastStreamRecvError::Lagged(skipped)) => {
-                                    let message = format!(
-                                        "SinkProcessor control input lagged by {} messages",
-                                        skipped
-                                    );
-                                    println!("[SinkProcessor:{processor_id}] control input lagged by {skipped} messages");
-                                    forward_error(&output, &processor_id, message.clone()).await?;
-                                    continue;
-                                }
-                            };
+                        if let Some(Ok(control_signal)) = control_item {
                             let is_terminal = control_signal.is_terminal();
-                            send_control_with_backpressure(&control_output, control_signal.clone()).await?;
+                            send_control_with_backpressure(&control_output, control_signal).await?;
                             if is_terminal {
                                 println!("[SinkProcessor:{processor_id}] received StreamEnd (control)");
                                 Self::handle_terminal(&mut connectors).await?;
@@ -209,9 +197,7 @@ impl Processor for SinkProcessor {
                                     Self::handle_collection(&processor_id, &mut connectors, collection.as_ref()).await
                                 {
                                     println!("[SinkProcessor:{processor_id}] collection handling error: {err}");
-                                    if let Some(output_sender) = &output {
-                                        forward_error(output_sender, &processor_id, err.to_string()).await?;
-                                    }
+                                    forward_error(&output, &processor_id, err.to_string()).await?;
                                     continue;
                                 }
 
