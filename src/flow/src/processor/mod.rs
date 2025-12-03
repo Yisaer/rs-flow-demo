@@ -8,8 +8,10 @@
 //! - All processors communicate via StreamData through tokio mspc channels
 
 pub mod base;
+pub mod batch_processor;
 pub mod control_source_processor;
 pub mod datasource_processor;
+pub mod encoder_processor;
 pub mod filter_processor;
 pub mod processor_builder;
 pub mod project_processor;
@@ -19,8 +21,10 @@ pub mod sink_processor;
 pub mod stream_data;
 
 pub use base::{Processor, ProcessorError};
+pub use batch_processor::BatchProcessor;
 pub use control_source_processor::ControlSourceProcessor;
 pub use datasource_processor::DataSourceProcessor;
+pub use encoder_processor::EncoderProcessor;
 pub use filter_processor::FilterProcessor;
 pub use processor_builder::{create_processor_pipeline, ProcessorPipeline};
 pub use project_processor::ProjectProcessor;

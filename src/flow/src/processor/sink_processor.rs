@@ -1,8 +1,5 @@
 //! SinkProcessor - routes collections to SinkConnectors and forwards results.
-
-use crate::codec::encoder::CollectionEncoder;
 use crate::connector::SinkConnector;
-use crate::model::Collection;
 use crate::processor::base::{
     fan_in_control_streams, fan_in_streams, forward_error, send_control_with_backpressure,
     send_with_backpressure, DEFAULT_CHANNEL_CAPACITY,
@@ -11,13 +8,11 @@ use crate::processor::{ControlSignal, Processor, ProcessorError, StreamData};
 use futures::stream::StreamExt;
 use once_cell::sync::Lazy;
 use prometheus::{register_int_counter_vec, IntCounterVec};
-use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 struct ConnectorBinding {
     connector: Box<dyn SinkConnector>,
-    encoder: Arc<dyn CollectionEncoder>,
 }
 
 impl ConnectorBinding {
@@ -32,14 +27,9 @@ impl ConnectorBinding {
             .map_err(|err| ProcessorError::ProcessingError(err.to_string()))
     }
 
-    async fn publish(&mut self, collection: &dyn Collection) -> Result<(), ProcessorError> {
-        let payload = self
-            .encoder
-            .encode(collection)
-            .map_err(|err| ProcessorError::ProcessingError(err.to_string()))?;
-
+    async fn publish(&mut self, payload: &[u8]) -> Result<(), ProcessorError> {
         self.connector
-            .send(&payload)
+            .send(payload)
             .await
             .map_err(|err| ProcessorError::ProcessingError(err.to_string()))?;
 
@@ -65,7 +55,7 @@ pub struct SinkProcessor {
     control_inputs: Vec<broadcast::Receiver<ControlSignal>>,
     output: broadcast::Sender<StreamData>,
     control_output: broadcast::Sender<ControlSignal>,
-    connectors: Vec<ConnectorBinding>,
+    connector: Option<ConnectorBinding>,
     forward_to_result: bool,
 }
 
@@ -98,7 +88,7 @@ impl SinkProcessor {
             control_inputs: Vec::new(),
             output,
             control_output,
-            connectors: Vec::new(),
+            connector: None,
             forward_to_result: false,
         }
     }
@@ -113,28 +103,21 @@ impl SinkProcessor {
         self.forward_to_result = false;
     }
 
-    /// Register a connector + encoder pair.
-    pub fn add_connector(
-        &mut self,
-        connector: Box<dyn SinkConnector>,
-        encoder: Arc<dyn CollectionEncoder>,
-    ) {
-        self.connectors
-            .push(ConnectorBinding { connector, encoder });
+    /// Register a connector binding.
+    pub fn add_connector(&mut self, connector: Box<dyn SinkConnector>) {
+        self.connector = Some(ConnectorBinding { connector });
     }
 
-    async fn handle_collection(
+    async fn handle_payload(
         processor_id: &str,
-        connectors: &mut [ConnectorBinding],
-        collection: &dyn Collection,
+        connector: &mut ConnectorBinding,
+        payload: &[u8],
+        row_count: u64,
     ) -> Result<(), ProcessorError> {
-        let row_count = collection.num_rows() as u64;
         SINK_RECORDS_IN
             .with_label_values(&[processor_id])
             .inc_by(row_count);
-        for connector in connectors.iter_mut() {
-            connector.publish(collection).await?;
-        }
+        connector.publish(payload).await?;
 
         SINK_RECORDS_OUT
             .with_label_values(&[processor_id])
@@ -142,11 +125,8 @@ impl SinkProcessor {
         Ok(())
     }
 
-    async fn handle_terminal(connectors: &mut [ConnectorBinding]) -> Result<(), ProcessorError> {
-        for connector in connectors.iter_mut() {
-            connector.close().await?;
-        }
-        Ok(())
+    async fn handle_terminal(connector: &mut ConnectorBinding) -> Result<(), ProcessorError> {
+        connector.close().await
     }
 }
 
@@ -164,14 +144,18 @@ impl Processor for SinkProcessor {
         let forward_data = self.forward_to_result;
         let control_output = self.control_output.clone();
 
-        let mut connectors = std::mem::take(&mut self.connectors);
+        let Some(mut connector) = self.connector.take() else {
+            return tokio::spawn(async {
+                Err(ProcessorError::InvalidConfiguration(
+                    "sink connector missing".to_string(),
+                ))
+            });
+        };
         let processor_id = self.id.clone();
         println!("[SinkProcessor:{processor_id}] starting");
 
         tokio::spawn(async move {
-            for binding in connectors.iter_mut() {
-                binding.ready().await?;
-            }
+            connector.ready().await?;
             loop {
                 tokio::select! {
                     biased;
@@ -181,7 +165,7 @@ impl Processor for SinkProcessor {
                             send_control_with_backpressure(&control_output, control_signal).await?;
                             if is_terminal {
                                 println!("[SinkProcessor:{processor_id}] received StreamEnd (control)");
-                                Self::handle_terminal(&mut connectors).await?;
+                                Self::handle_terminal(&mut connector).await?;
                                 println!("[SinkProcessor:{processor_id}] stopped");
                                 return Ok(());
                             }
@@ -192,11 +176,12 @@ impl Processor for SinkProcessor {
                     }
                     item = input_streams.next() => {
                         match item {
-                            Some(Ok(StreamData::Collection(collection))) => {
+                            Some(Ok(StreamData::Encoded { collection, payload })) => {
+                                let rows = collection.num_rows() as u64;
                                 if let Err(err) =
-                                    Self::handle_collection(&processor_id, &mut connectors, collection.as_ref()).await
+                                    Self::handle_payload(&processor_id, &mut connector, &payload, rows).await
                                 {
-                                    println!("[SinkProcessor:{processor_id}] collection handling error: {err}");
+                                    println!("[SinkProcessor:{processor_id}] payload handling error: {err}");
                                     forward_error(&output, &processor_id, err.to_string()).await?;
                                     continue;
                                 }
@@ -209,13 +194,38 @@ impl Processor for SinkProcessor {
                                     .await?;
                                 }
                             }
+                            Some(Ok(StreamData::Bytes(payload))) => {
+                                if let Err(err) =
+                                    Self::handle_payload(&processor_id, &mut connector, &payload, 1).await
+                                {
+                                    println!("[SinkProcessor:{processor_id}] payload handling error: {err}");
+                                    forward_error(&output, &processor_id, err.to_string()).await?;
+                                    continue;
+                                }
+
+                                if forward_data {
+                                    send_with_backpressure(
+                                        &output,
+                                        StreamData::Bytes(payload),
+                                    )
+                                    .await?;
+                                }
+                            }
+                            Some(Ok(StreamData::Collection(collection))) => {
+                                let message =
+                                    "sink processor received unencoded collection without encoder stage";
+                                println!("[SinkProcessor:{processor_id}] {message}");
+                                forward_error(&output, &processor_id, message).await?;
+                                drop(collection);
+                                continue;
+                            }
                             Some(Ok(data)) => {
                                 let is_terminal = data.is_terminal();
                                 send_with_backpressure(&output, data.clone()).await?;
 
                                 if is_terminal {
                                     println!("[SinkProcessor:{processor_id}] received StreamEnd (data)");
-                                    Self::handle_terminal(&mut connectors).await?;
+                                    Self::handle_terminal(&mut connector).await?;
                                     println!("[SinkProcessor:{processor_id}] stopped");
                                     return Ok(());
                                 }
@@ -230,7 +240,7 @@ impl Processor for SinkProcessor {
                                 continue;
                             }
                             None => {
-                                Self::handle_terminal(&mut connectors).await?;
+                                Self::handle_terminal(&mut connector).await?;
                                 println!("[SinkProcessor:{processor_id}] stopped");
                                 return Ok(());
                             }
