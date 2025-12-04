@@ -8,6 +8,9 @@ pub mod planner;
 pub mod processor;
 pub mod shared_stream;
 
+#[cfg(test)]
+mod physical_plan_builder_index_test;
+
 pub use catalog::{
     global_catalog, Catalog, CatalogError, MqttStreamProps, StreamDefinition, StreamProps,
     StreamType,
