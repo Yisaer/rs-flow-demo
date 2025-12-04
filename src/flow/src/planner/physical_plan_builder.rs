@@ -26,35 +26,59 @@ pub fn create_physical_plan_with_builder(
     bindings: &SchemaBinding,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
-    match logical_plan.as_ref() {
+    create_physical_plan_with_builder_cached(logical_plan, bindings, builder)
+}
+
+/// Create a physical plan from a logical plan using centralized index management with node caching
+///
+/// This function ensures that shared logical nodes are converted to shared physical nodes,
+/// maintaining the same instance across multiple references.
+fn create_physical_plan_with_builder_cached(
+    logical_plan: Arc<LogicalPlan>,
+    bindings: &SchemaBinding,
+    builder: &mut PhysicalPlanBuilder,
+) -> Result<Arc<PhysicalPlan>, String> {
+    let logical_index = logical_plan.get_plan_index();
+    
+    // Check if this logical node has already been converted using builder's cache
+    if let Some(cached_physical) = builder.get_cached_node(logical_index) {
+        return Ok(cached_physical);
+    }
+    
+    // Create the physical node
+    let physical_plan = match logical_plan.as_ref() {
         LogicalPlan::DataSource(logical_ds) => {
             let index = builder.allocate_index();
-            create_physical_data_source_with_builder(logical_ds, &logical_plan, index, bindings, builder)
+            create_physical_data_source_with_builder(logical_ds, &logical_plan, index, bindings, builder)?
         }
-        LogicalPlan::Filter(logical_filter) => create_physical_filter_with_builder(
+        LogicalPlan::Filter(logical_filter) => create_physical_filter_with_builder_cached(
             logical_filter,
             &logical_plan,
             bindings,
             builder,
-        ),
-        LogicalPlan::Project(logical_project) => create_physical_project_with_builder(
+        )?,
+        LogicalPlan::Project(logical_project) => create_physical_project_with_builder_cached(
             logical_project,
             &logical_plan,
             bindings,
             builder,
-        ),
-        LogicalPlan::DataSink(logical_sink) => create_physical_data_sink_with_builder(
+        )?,
+        LogicalPlan::DataSink(logical_sink) => create_physical_data_sink_with_builder_cached(
             logical_sink,
             &logical_plan,
             bindings,
             builder,
-        ),
+        )?,
         LogicalPlan::Tail(_logical_tail) => {
             // TailPlan is no longer used in new design, but handle it for backward compatibility
             // Convert to multiple DataSink nodes under a ResultCollect
-            create_physical_result_collect_from_tail_with_builder(&logical_plan, bindings, builder)
+            create_physical_result_collect_from_tail_with_builder_cached(&logical_plan, bindings, builder)?
         }
-    }
+    };
+    
+    // Cache the result for future reuse using builder's cache
+    builder.cache_node(logical_index, Arc::clone(&physical_plan));
+    Ok(physical_plan)
 }
 
 /// Create a physical plan from a logical plan (legacy version)
@@ -95,16 +119,16 @@ pub fn create_physical_plan(
     }
 }
 
-/// Create a PhysicalResultCollect from a TailPlan using centralized index management
-fn create_physical_result_collect_from_tail_with_builder(
+/// Create a PhysicalResultCollect from a TailPlan using centralized index management with caching
+fn create_physical_result_collect_from_tail_with_builder_cached(
     logical_plan: &Arc<LogicalPlan>,
     bindings: &SchemaBinding,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
-    // Convert children first using the builder
+    // Convert children first using the builder with caching
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
-        let physical_child = create_physical_plan_with_builder(child.clone(), bindings, builder)?;
+        let physical_child = create_physical_plan_with_builder_cached(child.clone(), bindings, builder)?;
         physical_children.push(physical_child);
     }
     
@@ -127,7 +151,7 @@ fn create_physical_result_collect_from_tail(
 ) -> Result<Arc<PhysicalPlan>, String> {
     // Use a dummy builder for compatibility
     let mut builder = PhysicalPlanBuilder::starting_from(index);
-    create_physical_result_collect_from_tail_with_builder(logical_plan, bindings, &mut builder)
+    create_physical_result_collect_from_tail_with_builder_cached(logical_plan, bindings, &mut builder)
 }
 
 /// Create a PhysicalDataSource from a LogicalDataSource using centralized index management
@@ -180,10 +204,20 @@ fn create_physical_filter_with_builder(
     bindings: &SchemaBinding,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
-    // Convert children first using the builder
+    create_physical_filter_with_builder_cached(logical_filter, logical_plan, bindings, builder)
+}
+
+/// Create a PhysicalFilter from a LogicalFilter using centralized index management with caching
+fn create_physical_filter_with_builder_cached(
+    logical_filter: &LogicalFilter,
+    logical_plan: &Arc<LogicalPlan>,
+    bindings: &SchemaBinding,
+    builder: &mut PhysicalPlanBuilder,
+) -> Result<Arc<PhysicalPlan>, String> {
+    // Convert children first using the builder with caching
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
-        let physical_child = create_physical_plan_with_builder(child.clone(), bindings, builder)?;
+        let physical_child = create_physical_plan_with_builder_cached(child.clone(), bindings, builder)?;
         physical_children.push(physical_child);
     }
 
@@ -225,10 +259,20 @@ fn create_physical_project_with_builder(
     bindings: &SchemaBinding,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
-    // Convert children first using the builder
+    create_physical_project_with_builder_cached(logical_project, logical_plan, bindings, builder)
+}
+
+/// Create a PhysicalProject from a LogicalProject using centralized index management with caching
+fn create_physical_project_with_builder_cached(
+    logical_project: &LogicalProject,
+    logical_plan: &Arc<LogicalPlan>,
+    bindings: &SchemaBinding,
+    builder: &mut PhysicalPlanBuilder,
+) -> Result<Arc<PhysicalPlan>, String> {
+    // Convert children first using the builder with caching
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
-        let physical_child = create_physical_plan_with_builder(child.clone(), bindings, builder)?;
+        let physical_child = create_physical_plan_with_builder_cached(child.clone(), bindings, builder)?;
         physical_children.push(physical_child);
     }
 
@@ -267,10 +311,20 @@ fn create_physical_data_sink_with_builder(
     bindings: &SchemaBinding,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
-    // Convert children first using the builder
+    create_physical_data_sink_with_builder_cached(logical_sink, logical_plan, bindings, builder)
+}
+
+/// Create a PhysicalDataSink from a DataSinkPlan using centralized index management with caching
+fn create_physical_data_sink_with_builder_cached(
+    logical_sink: &DataSinkPlan,
+    logical_plan: &Arc<LogicalPlan>,
+    bindings: &SchemaBinding,
+    builder: &mut PhysicalPlanBuilder,
+) -> Result<Arc<PhysicalPlan>, String> {
+    // Convert children first using the builder with caching
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
-        let physical_child = create_physical_plan_with_builder(child.clone(), bindings, builder)?;
+        let physical_child = create_physical_plan_with_builder_cached(child.clone(), bindings, builder)?;
         physical_children.push(physical_child);
     }
     if physical_children.len() != 1 {
@@ -316,7 +370,7 @@ fn build_sink_chain_with_builder(
 ) -> Result<(Arc<PhysicalPlan>, PhysicalSinkConnector), String> {
     let mut encoder_children = Vec::new();
     let mut connectors = Vec::new();
-    let shared_batch = create_shared_batch_if_needed_with_builder(sink, input_child, builder);
+    let batch_processor = create_batch_processor_if_needed_with_builder(sink, input_child, builder);
 
     let connector = &sink.connector;
     if should_use_streaming_encoder(sink, connector) {
@@ -330,7 +384,7 @@ fn build_sink_chain_with_builder(
             &mut connectors,
         );
     } else {
-        let encoder_input = shared_batch
+        let encoder_input = batch_processor
             .as_ref()
             .map(Arc::clone)
             .unwrap_or_else(|| Arc::clone(input_child));
@@ -363,7 +417,7 @@ fn build_sink_chain(
 ) -> Result<(Arc<PhysicalPlan>, PhysicalSinkConnector), String> {
     let mut encoder_children = Vec::new();
     let mut connectors = Vec::new();
-    let shared_batch = create_shared_batch_if_needed(sink, input_child, next_index);
+    let batch_processor = create_batch_processor_if_needed(sink, input_child, next_index);
 
     let connector = &sink.connector;
     if should_use_streaming_encoder(sink, connector) {
@@ -377,7 +431,7 @@ fn build_sink_chain(
             &mut connectors,
         );
     } else {
-        let encoder_input = shared_batch
+        let encoder_input = batch_processor
             .as_ref()
             .map(Arc::clone)
             .unwrap_or_else(|| Arc::clone(input_child));
@@ -406,8 +460,8 @@ fn should_use_streaming_encoder(sink: &PipelineSink, connector: &PipelineSinkCon
     sink.common.is_batching_enabled() && connector.encoder.supports_streaming()
 }
 
-/// Create shared batch if needed using centralized index management
-fn create_shared_batch_if_needed_with_builder(
+/// Create batch processor if needed using centralized index management
+fn create_batch_processor_if_needed_with_builder(
     sink: &PipelineSink,
     input_child: &Arc<PhysicalPlan>,
     builder: &mut PhysicalPlanBuilder,
@@ -429,8 +483,8 @@ fn create_shared_batch_if_needed_with_builder(
     Some(Arc::new(PhysicalPlan::Batch(batch_plan)))
 }
 
-/// Create shared batch if needed (legacy version)
-fn create_shared_batch_if_needed(
+/// Create batch processor if needed (legacy version)
+fn create_batch_processor_if_needed(
     sink: &PipelineSink,
     input_child: &Arc<PhysicalPlan>,
     next_index: &mut i64,
