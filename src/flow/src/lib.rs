@@ -2,6 +2,7 @@ pub mod catalog;
 pub mod codec;
 pub mod connector;
 pub mod expr;
+pub mod instance;
 pub mod model;
 pub mod pipeline;
 pub mod planner;
@@ -26,6 +27,7 @@ pub use expr::{
     convert_expr_to_scalar, convert_select_stmt_to_scalar, extract_select_expressions, BinaryFunc,
     ConcatFunc, ConversionError, EvalContext, ScalarExpr, StreamSqlConverter, UnaryFunc,
 };
+pub use instance::{FlowInstance, FlowInstanceError, StreamRuntimeInfo};
 pub use model::{Collection, RecordBatch};
 pub use pipeline::{
     MqttSinkProps, PipelineDefinition, PipelineError, PipelineManager, PipelineSnapshot,

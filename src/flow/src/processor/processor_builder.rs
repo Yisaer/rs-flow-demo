@@ -7,7 +7,7 @@ use crate::codec::{CollectionEncoder, JsonEncoder};
 use crate::connector::sink::mqtt::MqttSinkConnector;
 use crate::connector::sink::nop::NopSinkConnector;
 use crate::connector::sink::SinkConnector;
-use crate::planner::physical::{PhysicalPlan};
+use crate::planner::physical::PhysicalPlan;
 use crate::planner::sink::{SinkConnectorConfig, SinkEncoderConfig};
 use crate::processor::{
     BatchProcessor, ControlSignal, ControlSourceProcessor, DataSourceProcessor, EncoderProcessor,
@@ -386,11 +386,7 @@ fn create_processor_from_plan_node(
             ))
         }
         PhysicalPlan::DataSink(sink_plan) => {
-            let processor_id = format!(
-                "{}_{}",
-                plan_name,
-                sink_plan.connector.sink_id
-            );
+            let processor_id = format!("{}_{}", plan_name, sink_plan.connector.sink_id);
             let mut processor = SinkProcessor::new(processor_id);
             if sink_plan.connector.forward_to_result {
                 processor.enable_result_forwarding();
@@ -484,11 +480,7 @@ fn build_processors_recursive(
 /// Collect leaf node indices from PhysicalPlan tree
 fn collect_leaf_indices(plan: Arc<PhysicalPlan>) -> Vec<i64> {
     use std::collections::HashSet;
-    fn helper(
-        plan: Arc<PhysicalPlan>,
-        leaves: &mut HashSet<i64>,
-        visited: &mut HashSet<i64>,
-    ) {
+    fn helper(plan: Arc<PhysicalPlan>, leaves: &mut HashSet<i64>, visited: &mut HashSet<i64>) {
         let index = plan.get_plan_index();
         if !visited.insert(index) {
             return;
@@ -541,7 +533,7 @@ fn build_index_to_name_mapping(
     let plan_index = plan.get_plan_index();
     let plan_name = plan.get_plan_name();
     mapping.insert(plan_index, plan_name);
-    
+
     // Recursively process children
     for child in plan.children() {
         build_index_to_name_mapping(child, mapping);
@@ -559,7 +551,8 @@ fn connect_processors(
     control_source: &mut ControlSourceProcessor,
 ) -> Result<(), ProcessorError> {
     // Build index to name mapping for quick lookup
-    let mut index_to_name_map: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+    let mut index_to_name_map: std::collections::HashMap<i64, String> =
+        std::collections::HashMap::new();
     build_index_to_name_mapping(&physical_plan, &mut index_to_name_map);
 
     // 1. Connect ControlSourceProcessor to all leaf nodes
@@ -580,7 +573,7 @@ fn connect_processors(
 
     // 2. Connect children outputs to parent inputs
     let relations = collect_parent_child_relations(Arc::clone(&physical_plan));
-    
+
     // Debug: Print connection relationships
     // println!("=== Processor Connection Relationships ===");
     // let mut relation_counts: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
@@ -597,14 +590,14 @@ fn connect_processors(
     //     }
     // }
     // println!("=========================================");
-    
+
     for (parent_index, child_index) in relations {
         if let (Some(child_plan_name), Some(parent_plan_name)) = (
             index_to_name_map.get(&child_index),
-            index_to_name_map.get(&parent_index)
+            index_to_name_map.get(&parent_index),
         ) {
             println!("Connecting {} -> {}", child_plan_name, parent_plan_name);
-            
+
             let receiver = processor_map
                 .get_processor(child_plan_name)
                 .and_then(|proc| proc.subscribe_output())
@@ -714,9 +707,7 @@ fn instantiate_connector(
             sink_id.to_string(),
             mqtt_cfg.clone(),
         ))),
-        SinkConnectorConfig::Nop(_) => {
-            Ok(Box::new(NopSinkConnector::new(sink_id.to_string())))
-        }
+        SinkConnectorConfig::Nop(_) => Ok(Box::new(NopSinkConnector::new(sink_id.to_string()))),
     }
 }
 
