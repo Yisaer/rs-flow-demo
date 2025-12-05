@@ -1,12 +1,14 @@
 use crate::catalog::{Catalog, StreamDefinition, StreamProps};
-use crate::connector::{MqttClientManager, MqttSinkConfig, MqttSourceConfig, MqttSourceConnector};
-use crate::planner::sink::CommonSinkProps;
+use crate::codec::{DecoderRegistry, EncoderRegistry};
+use crate::connector::{
+    ConnectorRegistry, MqttClientManager, MqttSinkConfig, MqttSourceConfig, MqttSourceConnector,
+};
+use crate::planner::sink::{CommonSinkProps, SinkEncoderConfig};
 use crate::processor::processor_builder::{PlanProcessor, ProcessorPipeline};
 use crate::processor::Processor;
 use crate::shared_stream::SharedStreamRegistry;
 use crate::{
-    create_pipeline, JsonDecoder, PipelineSink, PipelineSinkConnector, SinkConnectorConfig,
-    SinkEncoderConfig,
+    create_pipeline, PipelineRegistries, PipelineSink, PipelineSinkConnector, SinkConnectorConfig,
 };
 use parser::parse_sql;
 use std::collections::HashMap;
@@ -94,20 +96,28 @@ pub struct SinkDefinition {
     pub sink_type: SinkType,
     pub props: SinkProps,
     pub common: CommonSinkProps,
+    pub encoder: SinkEncoderConfig,
 }
 
 impl SinkDefinition {
     pub fn new(sink_id: impl Into<String>, sink_type: SinkType, props: SinkProps) -> Self {
+        let sink_id_str = sink_id.into();
         Self {
-            sink_id: sink_id.into(),
+            sink_id: sink_id_str.clone(),
             sink_type,
             props,
             common: CommonSinkProps::default(),
+            encoder: SinkEncoderConfig::json(),
         }
     }
 
     pub fn with_common_props(mut self, common: CommonSinkProps) -> Self {
         self.common = common;
+        self
+    }
+
+    pub fn with_encoder(mut self, encoder: SinkEncoderConfig) -> Self {
+        self.encoder = encoder;
         self
     }
 }
@@ -173,6 +183,9 @@ pub struct PipelineManager {
     catalog: Arc<Catalog>,
     shared_stream_registry: &'static SharedStreamRegistry,
     mqtt_client_manager: MqttClientManager,
+    connector_registry: Arc<ConnectorRegistry>,
+    encoder_registry: Arc<EncoderRegistry>,
+    decoder_registry: Arc<DecoderRegistry>,
 }
 
 impl PipelineManager {
@@ -180,12 +193,18 @@ impl PipelineManager {
         catalog: Arc<Catalog>,
         shared_stream_registry: &'static SharedStreamRegistry,
         mqtt_client_manager: MqttClientManager,
+        connector_registry: Arc<ConnectorRegistry>,
+        decoder_registry: Arc<DecoderRegistry>,
+        encoder_registry: Arc<EncoderRegistry>,
     ) -> Self {
         Self {
             pipelines: RwLock::new(HashMap::new()),
             catalog,
             shared_stream_registry,
             mqtt_client_manager,
+            connector_registry,
+            encoder_registry,
+            decoder_registry,
         }
     }
 
@@ -195,11 +214,17 @@ impl PipelineManager {
         definition: PipelineDefinition,
     ) -> Result<PipelineSnapshot, PipelineError> {
         let pipeline_id = definition.id().to_string();
+        let registries = PipelineRegistries::new(
+            Arc::clone(&self.connector_registry),
+            Arc::clone(&self.encoder_registry),
+            Arc::clone(&self.decoder_registry),
+        );
         let (pipeline, streams) = build_pipeline_runtime(
             &definition,
             &self.catalog,
             self.shared_stream_registry,
             &self.mqtt_client_manager,
+            &registries,
         )
         .map_err(PipelineError::BuildFailure)?;
         let mut guard = self.pipelines.write().expect("pipeline manager poisoned");
@@ -277,6 +302,7 @@ fn build_pipeline_runtime(
     catalog: &Catalog,
     shared_stream_registry: &SharedStreamRegistry,
     mqtt_client_manager: &MqttClientManager,
+    registries: &PipelineRegistries,
 ) -> Result<(ProcessorPipeline, Vec<String>), String> {
     let select_stmt = parse_sql(definition.sql()).map_err(|err| err.to_string())?;
     let streams: Vec<String> = select_stmt
@@ -299,6 +325,7 @@ fn build_pipeline_runtime(
         catalog,
         shared_stream_registry,
         mqtt_client_manager.clone(),
+        registries,
     )
     .map_err(|err| err.to_string())?;
     attach_sources_from_catalog(&mut pipeline, &stream_definitions, mqtt_client_manager)?;
@@ -334,9 +361,7 @@ fn build_sinks_from_definition(
                 let connector = PipelineSinkConnector::new(
                     sink.sink_id.clone(),
                     SinkConnectorConfig::Mqtt(config),
-                    SinkEncoderConfig::Json {
-                        encoder_id: format!("{}_sink_encoder", sink.sink_id),
-                    },
+                    sink.encoder.clone(),
                 );
                 let pipeline_sink = PipelineSink::new(sink.sink_id.clone(), connector)
                     .with_common_props(sink.common.clone());
@@ -361,8 +386,6 @@ fn attach_sources_from_catalog(
             })?;
             let StreamProps::Mqtt(stream_props) = definition.props();
             let processor_id = ds.id().to_string();
-            let schema = ds.schema();
-
             let mut config = MqttSourceConfig::new(
                 processor_id.clone(),
                 stream_props.broker_url.clone(),
@@ -380,8 +403,7 @@ fn attach_sources_from_catalog(
                 config,
                 mqtt_client_manager.clone(),
             );
-            let decoder = Arc::new(JsonDecoder::new(stream_name, schema));
-            ds.add_connector(Box::new(connector), decoder);
+            ds.add_connector(Box::new(connector));
             attached = true;
         }
     }
@@ -396,8 +418,11 @@ fn attach_sources_from_catalog(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::{Catalog, MqttStreamProps, StreamDefinition, StreamProps};
-    use crate::connector::MqttClientManager;
+    use crate::catalog::{
+        Catalog, MqttStreamProps, StreamDecoderConfig, StreamDefinition, StreamProps,
+    };
+    use crate::codec::EncoderRegistry;
+    use crate::connector::{ConnectorRegistry, MqttClientManager};
     use crate::shared_stream_registry;
     use datatypes::{ColumnSchema, ConcreteDatatype, Int64Type, Schema};
     use std::sync::Arc;
@@ -417,6 +442,7 @@ mod tests {
                 format!("{name}/in"),
                 0,
             )),
+            StreamDecoderConfig::json_default(name),
         );
         catalog.upsert(definition);
     }
@@ -443,8 +469,18 @@ mod tests {
         let catalog = Arc::new(Catalog::new());
         let registry = shared_stream_registry();
         let mqtt_manager = MqttClientManager::new();
+        let connector_registry = ConnectorRegistry::with_builtin_sinks();
+        let encoder_registry = EncoderRegistry::with_builtin_encoders();
+        let decoder_registry = DecoderRegistry::with_builtin_decoders();
         install_stream(&catalog, "test_stream");
-        let manager = PipelineManager::new(Arc::clone(&catalog), registry, mqtt_manager.clone());
+        let manager = PipelineManager::new(
+            Arc::clone(&catalog),
+            registry,
+            mqtt_manager.clone(),
+            Arc::clone(&connector_registry),
+            Arc::clone(&decoder_registry),
+            Arc::clone(&encoder_registry),
+        );
         let snapshot = manager
             .create_pipeline(sample_pipeline("pipe_a", "test_stream"))
             .expect("create pipeline");
@@ -463,8 +499,18 @@ mod tests {
         let catalog = Arc::new(Catalog::new());
         let registry = shared_stream_registry();
         let mqtt_manager = MqttClientManager::new();
+        let connector_registry = ConnectorRegistry::with_builtin_sinks();
+        let encoder_registry = EncoderRegistry::with_builtin_encoders();
+        let decoder_registry = DecoderRegistry::with_builtin_decoders();
         install_stream(&catalog, "dup_stream");
-        let manager = PipelineManager::new(Arc::clone(&catalog), registry, mqtt_manager.clone());
+        let manager = PipelineManager::new(
+            Arc::clone(&catalog),
+            registry,
+            mqtt_manager.clone(),
+            connector_registry,
+            decoder_registry,
+            encoder_registry,
+        );
         manager
             .create_pipeline(sample_pipeline("dup_pipe", "dup_stream"))
             .expect("first creation");

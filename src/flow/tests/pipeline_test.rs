@@ -4,7 +4,7 @@
 //! and the customizable `create_pipeline` API that accepts user-defined sinks.
 
 use datatypes::{ColumnSchema, ConcreteDatatype, Schema, Value};
-use flow::catalog::{MqttStreamProps, StreamDefinition, StreamProps};
+use flow::catalog::{MqttStreamProps, StreamDecoderConfig, StreamDefinition, StreamProps};
 use flow::model::batch_from_columns_simple;
 use flow::planner::sink::{
     CommonSinkProps, NopSinkConfig, PipelineSink, PipelineSinkConnector, SinkConnectorConfig,
@@ -325,9 +325,7 @@ async fn test_create_pipeline_with_custom_sink_connectors() {
     let connector = PipelineSinkConnector::new(
         "custom_sink_connector",
         SinkConnectorConfig::Nop(NopSinkConfig),
-        SinkEncoderConfig::Json {
-            encoder_id: "json".to_string(),
-        },
+        SinkEncoderConfig::json(),
     );
     let sink = PipelineSink::new("custom_sink", connector).with_forward_to_result(true);
 
@@ -382,9 +380,7 @@ async fn test_batch_processor_flushes_on_count() {
     let connector = PipelineSinkConnector::new(
         "batch_sink_connector",
         SinkConnectorConfig::Nop(NopSinkConfig),
-        SinkEncoderConfig::Json {
-            encoder_id: "json".to_string(),
-        },
+        SinkEncoderConfig::json(),
     );
     let sink = PipelineSink::new("batch_sink", connector)
         .with_forward_to_result(true)
@@ -467,6 +463,7 @@ async fn install_stream_schema(instance: &FlowInstance, columns: &[(String, Vec<
         "stream".to_string(),
         Arc::new(schema),
         StreamProps::Mqtt(MqttStreamProps::default()),
+        StreamDecoderConfig::json_default("stream"),
     );
     instance
         .create_stream(definition, false)

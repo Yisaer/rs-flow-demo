@@ -1,4 +1,5 @@
 use crate::connector::sink::mqtt::MqttSinkConfig;
+use serde_json::Value as JsonValue;
 use std::fmt;
 use std::time::Duration;
 
@@ -82,6 +83,31 @@ impl fmt::Debug for PipelineSinkConnector {
 pub enum SinkConnectorConfig {
     Mqtt(MqttSinkConfig),
     Nop(NopSinkConfig),
+    Custom(CustomSinkConnectorConfig),
+}
+
+impl SinkConnectorConfig {
+    pub fn kind(&self) -> &str {
+        match self {
+            SinkConnectorConfig::Mqtt(_) => "mqtt",
+            SinkConnectorConfig::Nop(_) => "nop",
+            SinkConnectorConfig::Custom(custom) => custom.kind.as_str(),
+        }
+    }
+
+    pub fn custom_settings(&self) -> Option<&JsonValue> {
+        match self {
+            SinkConnectorConfig::Custom(custom) => Some(&custom.settings),
+            _ => None,
+        }
+    }
+}
+
+/// JSON-based payload for custom connectors.
+#[derive(Clone, Debug)]
+pub struct CustomSinkConnectorConfig {
+    pub kind: String,
+    pub settings: JsonValue,
 }
 
 /// Configuration for a no-op sink connector.
@@ -89,17 +115,26 @@ pub enum SinkConnectorConfig {
 pub struct NopSinkConfig;
 
 /// Configuration for supported sink encoders.
-#[derive(Clone, Debug)]
-pub enum SinkEncoderConfig {
-    Json { encoder_id: String },
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SinkEncoderConfig {
+    kind: String,
 }
 
 impl SinkEncoderConfig {
-    /// Whether this encoder supports streaming aggregation.
-    pub fn supports_streaming(&self) -> bool {
-        match self {
-            SinkEncoderConfig::Json { .. } => true,
-        }
+    pub fn new(kind: impl Into<String>) -> Self {
+        Self { kind: kind.into() }
+    }
+
+    pub fn json() -> Self {
+        Self::new("json")
+    }
+
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    pub fn custom_settings(&self) -> Option<&JsonValue> {
+        None
     }
 }
 

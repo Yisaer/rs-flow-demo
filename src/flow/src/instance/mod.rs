@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::catalog::{Catalog, CatalogError, StreamDefinition, StreamProps};
+use crate::codec::{CodecError, DecoderRegistry, EncoderRegistry};
 use crate::connector::{
-    ConnectorError, MqttClientManager, MqttSourceConfig, MqttSourceConnector,
+    ConnectorError, ConnectorRegistry, MqttClientManager, MqttSourceConfig, MqttSourceConnector,
     SharedMqttClientConfig,
 };
 use crate::pipeline::{PipelineDefinition, PipelineError, PipelineManager, PipelineSnapshot};
@@ -13,7 +14,7 @@ use crate::shared_stream::{
     SharedStreamRegistry,
 };
 use crate::{create_pipeline, create_pipeline_with_log_sink};
-use crate::{JsonDecoder, PipelineSink};
+use crate::{PipelineRegistries, PipelineSink};
 
 /// Runtime container that manages all Flow resources (streams, pipelines, shared clients).
 #[derive(Clone)]
@@ -23,6 +24,9 @@ pub struct FlowInstance {
     pipeline_manager: Arc<PipelineManager>,
     shared_mqtt_clients: Arc<Mutex<HashMap<String, SharedMqttClientConfig>>>,
     mqtt_client_manager: MqttClientManager,
+    connector_registry: Arc<ConnectorRegistry>,
+    encoder_registry: Arc<EncoderRegistry>,
+    decoder_registry: Arc<DecoderRegistry>,
 }
 
 impl FlowInstance {
@@ -31,10 +35,16 @@ impl FlowInstance {
         let catalog = Arc::new(Catalog::new());
         let shared_stream_registry = shared_stream_registry();
         let mqtt_client_manager = MqttClientManager::new();
+        let connector_registry = ConnectorRegistry::with_builtin_sinks();
+        let encoder_registry = EncoderRegistry::with_builtin_encoders();
+        let decoder_registry = DecoderRegistry::with_builtin_decoders();
         let pipeline_manager = Arc::new(PipelineManager::new(
             Arc::clone(&catalog),
             shared_stream_registry,
             mqtt_client_manager.clone(),
+            Arc::clone(&connector_registry),
+            Arc::clone(&decoder_registry),
+            Arc::clone(&encoder_registry),
         ));
         Self {
             catalog,
@@ -42,6 +52,9 @@ impl FlowInstance {
             pipeline_manager,
             shared_mqtt_clients: Arc::new(Mutex::new(HashMap::new())),
             mqtt_client_manager,
+            connector_registry,
+            encoder_registry,
+            decoder_registry,
         }
     }
 
@@ -187,12 +200,14 @@ impl FlowInstance {
         sql: &str,
         sinks: Vec<PipelineSink>,
     ) -> Result<ProcessorPipeline, Box<dyn std::error::Error>> {
+        let registries = self.pipeline_registries();
         create_pipeline(
             sql,
             sinks,
             &self.catalog,
             self.shared_stream_registry,
             self.mqtt_client_manager.clone(),
+            &registries,
         )
     }
 
@@ -202,12 +217,34 @@ impl FlowInstance {
         sql: &str,
         forward_to_result: bool,
     ) -> Result<ProcessorPipeline, Box<dyn std::error::Error>> {
+        let registries = self.pipeline_registries();
         create_pipeline_with_log_sink(
             sql,
             forward_to_result,
             &self.catalog,
             self.shared_stream_registry,
             self.mqtt_client_manager.clone(),
+            &registries,
+        )
+    }
+
+    pub fn connector_registry(&self) -> Arc<ConnectorRegistry> {
+        Arc::clone(&self.connector_registry)
+    }
+
+    pub fn encoder_registry(&self) -> Arc<EncoderRegistry> {
+        Arc::clone(&self.encoder_registry)
+    }
+
+    pub fn decoder_registry(&self) -> Arc<DecoderRegistry> {
+        Arc::clone(&self.decoder_registry)
+    }
+
+    fn pipeline_registries(&self) -> PipelineRegistries {
+        PipelineRegistries::new(
+            Arc::clone(&self.connector_registry),
+            Arc::clone(&self.encoder_registry),
+            Arc::clone(&self.decoder_registry),
         )
     }
 
@@ -235,7 +272,10 @@ impl FlowInstance {
                     source_config,
                     self.mqtt_client_manager.clone(),
                 );
-                let decoder = Arc::new(JsonDecoder::new(definition.id(), definition.schema()));
+                let decoder = self
+                    .decoder_registry
+                    .instantiate(definition.decoder(), definition.id(), definition.schema())
+                    .map_err(FlowInstanceError::from)?;
                 config.set_connector(Box::new(connector), decoder);
                 self.shared_stream_registry
                     .create_stream(config)
@@ -268,6 +308,8 @@ pub enum FlowInstanceError {
     SharedStream(#[from] SharedStreamError),
     #[error(transparent)]
     Connector(#[from] ConnectorError),
+    #[error(transparent)]
+    Codec(#[from] CodecError),
     #[error("{0}")]
     Invalid(String),
 }
