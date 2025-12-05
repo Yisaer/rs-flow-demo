@@ -7,7 +7,9 @@ use crate::planner::sink::{CommonSinkProps, SinkEncoderConfig};
 use crate::processor::processor_builder::{PlanProcessor, ProcessorPipeline};
 use crate::processor::Processor;
 use crate::shared_stream::SharedStreamRegistry;
-use crate::{create_pipeline, PipelineSink, PipelineSinkConnector, SinkConnectorConfig};
+use crate::{
+    create_pipeline, PipelineRegistries, PipelineSink, PipelineSinkConnector, SinkConnectorConfig,
+};
 use parser::parse_sql;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -212,14 +214,17 @@ impl PipelineManager {
         definition: PipelineDefinition,
     ) -> Result<PipelineSnapshot, PipelineError> {
         let pipeline_id = definition.id().to_string();
+        let registries = PipelineRegistries::new(
+            Arc::clone(&self.connector_registry),
+            Arc::clone(&self.encoder_registry),
+            Arc::clone(&self.decoder_registry),
+        );
         let (pipeline, streams) = build_pipeline_runtime(
             &definition,
             &self.catalog,
             self.shared_stream_registry,
             &self.mqtt_client_manager,
-            &self.connector_registry,
-            &self.decoder_registry,
-            &self.encoder_registry,
+            &registries,
         )
         .map_err(PipelineError::BuildFailure)?;
         let mut guard = self.pipelines.write().expect("pipeline manager poisoned");
@@ -297,9 +302,7 @@ fn build_pipeline_runtime(
     catalog: &Catalog,
     shared_stream_registry: &SharedStreamRegistry,
     mqtt_client_manager: &MqttClientManager,
-    connector_registry: &Arc<ConnectorRegistry>,
-    decoder_registry: &Arc<DecoderRegistry>,
-    encoder_registry: &Arc<EncoderRegistry>,
+    registries: &PipelineRegistries,
 ) -> Result<(ProcessorPipeline, Vec<String>), String> {
     let select_stmt = parse_sql(definition.sql()).map_err(|err| err.to_string())?;
     let streams: Vec<String> = select_stmt
@@ -322,9 +325,7 @@ fn build_pipeline_runtime(
         catalog,
         shared_stream_registry,
         mqtt_client_manager.clone(),
-        Arc::clone(connector_registry),
-        Arc::clone(encoder_registry),
-        Arc::clone(decoder_registry),
+        registries,
     )
     .map_err(|err| err.to_string())?;
     attach_sources_from_catalog(&mut pipeline, &stream_definitions, mqtt_client_manager)?;

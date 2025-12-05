@@ -13,8 +13,8 @@ use crate::shared_stream::{
     registry as shared_stream_registry, SharedStreamConfig, SharedStreamError, SharedStreamInfo,
     SharedStreamRegistry,
 };
-use crate::PipelineSink;
 use crate::{create_pipeline, create_pipeline_with_log_sink};
+use crate::{PipelineRegistries, PipelineSink};
 
 /// Runtime container that manages all Flow resources (streams, pipelines, shared clients).
 #[derive(Clone)]
@@ -200,15 +200,14 @@ impl FlowInstance {
         sql: &str,
         sinks: Vec<PipelineSink>,
     ) -> Result<ProcessorPipeline, Box<dyn std::error::Error>> {
+        let registries = self.pipeline_registries();
         create_pipeline(
             sql,
             sinks,
             &self.catalog,
             self.shared_stream_registry,
             self.mqtt_client_manager.clone(),
-            Arc::clone(&self.connector_registry),
-            Arc::clone(&self.encoder_registry),
-            Arc::clone(&self.decoder_registry),
+            &registries,
         )
     }
 
@@ -218,15 +217,14 @@ impl FlowInstance {
         sql: &str,
         forward_to_result: bool,
     ) -> Result<ProcessorPipeline, Box<dyn std::error::Error>> {
+        let registries = self.pipeline_registries();
         create_pipeline_with_log_sink(
             sql,
             forward_to_result,
             &self.catalog,
             self.shared_stream_registry,
             self.mqtt_client_manager.clone(),
-            Arc::clone(&self.connector_registry),
-            Arc::clone(&self.encoder_registry),
-            Arc::clone(&self.decoder_registry),
+            &registries,
         )
     }
 
@@ -240,6 +238,14 @@ impl FlowInstance {
 
     pub fn decoder_registry(&self) -> Arc<DecoderRegistry> {
         Arc::clone(&self.decoder_registry)
+    }
+
+    fn pipeline_registries(&self) -> PipelineRegistries {
+        PipelineRegistries::new(
+            Arc::clone(&self.connector_registry),
+            Arc::clone(&self.encoder_registry),
+            Arc::clone(&self.decoder_registry),
+        )
     }
 
     async fn ensure_shared_stream(

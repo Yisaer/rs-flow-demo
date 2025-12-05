@@ -62,16 +62,10 @@ impl StreamPropsRequest {
     }
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Default)]
 #[serde(default)]
 pub struct StreamDecoderConfigRequest {
     pub decoder_id: Option<String>,
-}
-
-impl Default for StreamDecoderConfigRequest {
-    fn default() -> Self {
-        Self { decoder_id: None }
-    }
 }
 
 #[derive(Deserialize, Default, Clone)]

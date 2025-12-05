@@ -246,7 +246,7 @@ fn build_pipeline_definition(req: &CreatePipelineRequest) -> Result<PipelineDefi
             .kind
             .clone()
             .unwrap_or_else(|| "json".to_string());
-        if encoder_kind.to_ascii_lowercase() != "json" {
+        if !encoder_kind.eq_ignore_ascii_case("json") {
             return Err(format!("unsupported sink encoder kind: {}", encoder_kind));
         }
         let encoder_config = SinkEncoderConfig::new(encoder_kind);
