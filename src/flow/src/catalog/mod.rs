@@ -64,10 +64,16 @@ pub struct StreamDefinition {
     stream_type: StreamType,
     schema: Arc<Schema>,
     props: StreamProps,
+    decoder: StreamDecoderConfig,
 }
 
 impl StreamDefinition {
-    pub fn new(id: impl Into<String>, schema: Arc<Schema>, props: StreamProps) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        schema: Arc<Schema>,
+        props: StreamProps,
+        decoder: StreamDecoderConfig,
+    ) -> Self {
         let stream_type = match props {
             StreamProps::Mqtt(_) => StreamType::Mqtt,
         };
@@ -76,6 +82,7 @@ impl StreamDefinition {
             stream_type,
             schema,
             props,
+            decoder,
         }
     }
 
@@ -93,6 +100,36 @@ impl StreamDefinition {
 
     pub fn props(&self) -> &StreamProps {
         &self.props
+    }
+
+    pub fn decoder(&self) -> &StreamDecoderConfig {
+        &self.decoder
+    }
+}
+
+/// Configuration describing which decoder should be used for a stream's payloads.
+#[derive(Debug, Clone)]
+pub struct StreamDecoderConfig {
+    decoder_id: String,
+}
+
+impl StreamDecoderConfig {
+    pub fn new(decoder_id: impl Into<String>) -> Self {
+        Self {
+            decoder_id: decoder_id.into(),
+        }
+    }
+
+    pub fn decoder_id(&self) -> &str {
+        &self.decoder_id
+    }
+
+    pub fn kind(&self) -> &str {
+        "json"
+    }
+
+    pub fn json_default(stream_id: &str) -> Self {
+        Self::new(format!("{stream_id}_decoder"))
     }
 }
 

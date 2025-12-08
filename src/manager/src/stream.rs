@@ -6,7 +6,7 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use flow::catalog::{CatalogError, MqttStreamProps};
+use flow::catalog::{CatalogError, MqttStreamProps, StreamDecoderConfig};
 use flow::shared_stream::{SharedStreamError, SharedStreamInfo, SharedStreamStatus};
 use flow::{FlowInstanceError, Schema, StreamDefinition, StreamProps, StreamRuntimeInfo};
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,8 @@ pub struct CreateStreamRequest {
     pub props: StreamPropsRequest,
     #[serde(default)]
     pub shared: bool,
+    #[serde(default)]
+    pub decoder: Option<StreamDecoderConfigRequest>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -58,6 +60,12 @@ impl StreamPropsRequest {
     fn to_value(&self) -> JsonValue {
         JsonValue::Object(self.fields.clone())
     }
+}
+
+#[derive(Deserialize, Clone, Default)]
+#[serde(default)]
+pub struct StreamDecoderConfigRequest {
+    pub decoder_id: Option<String>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -132,7 +140,13 @@ pub async fn create_stream_handler(
         Err(err) => return (StatusCode::BAD_REQUEST, err).into_response(),
     };
 
-    let definition = StreamDefinition::new(req.name.clone(), Arc::new(schema), stream_props);
+    let decoder = match build_stream_decoder(&req) {
+        Ok(config) => config,
+        Err(err) => return (StatusCode::BAD_REQUEST, err).into_response(),
+    };
+
+    let definition =
+        StreamDefinition::new(req.name.clone(), Arc::new(schema), stream_props, decoder);
 
     match state.instance.create_stream(definition, req.shared).await {
         Ok(info) => {
@@ -287,6 +301,15 @@ fn build_stream_props(
         }
         other => Err(format!("unsupported stream type: {other}")),
     }
+}
+
+fn build_stream_decoder(req: &CreateStreamRequest) -> Result<StreamDecoderConfig, String> {
+    let config = req.decoder.clone().unwrap_or_default();
+    Ok(StreamDecoderConfig::new(
+        config
+            .decoder_id
+            .unwrap_or_else(|| format!("{}_decoder", req.name)),
+    ))
 }
 
 fn column_schema_from_request(

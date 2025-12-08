@@ -3,13 +3,9 @@
 //! This module provides utilities to build processor pipelines from PhysicalPlan,
 //! connecting ControlSourceProcessor outputs to leaf nodes (nodes without children).
 
-use crate::codec::{CollectionEncoder, JsonEncoder};
-use crate::connector::sink::mqtt::MqttSinkConnector;
-use crate::connector::sink::nop::NopSinkConnector;
-use crate::connector::sink::SinkConnector;
-use crate::connector::MqttClientManager;
+use crate::codec::{DecoderRegistry, EncoderRegistry};
+use crate::connector::{ConnectorRegistry, MqttClientManager};
 use crate::planner::physical::PhysicalPlan;
-use crate::planner::sink::{SinkConnectorConfig, SinkEncoderConfig};
 use crate::processor::{
     BatchProcessor, ControlSignal, ControlSourceProcessor, DataSourceProcessor, EncoderProcessor,
     FilterProcessor, Processor, ProcessorError, ProjectProcessor, ResultCollectProcessor,
@@ -48,15 +44,40 @@ pub enum PlanProcessor {
 #[derive(Clone)]
 struct ProcessorBuilderContext {
     mqtt_clients: MqttClientManager,
+    connector_registry: Arc<ConnectorRegistry>,
+    encoder_registry: Arc<EncoderRegistry>,
+    decoder_registry: Arc<DecoderRegistry>,
 }
 
 impl ProcessorBuilderContext {
-    fn new(mqtt_clients: MqttClientManager) -> Self {
-        Self { mqtt_clients }
+    fn new(
+        mqtt_clients: MqttClientManager,
+        connector_registry: Arc<ConnectorRegistry>,
+        encoder_registry: Arc<EncoderRegistry>,
+        decoder_registry: Arc<DecoderRegistry>,
+    ) -> Self {
+        Self {
+            mqtt_clients,
+            connector_registry,
+            encoder_registry,
+            decoder_registry,
+        }
     }
 
-    fn mqtt_clients(&self) -> MqttClientManager {
-        self.mqtt_clients.clone()
+    fn mqtt_clients_ref(&self) -> &MqttClientManager {
+        &self.mqtt_clients
+    }
+
+    fn connector_registry(&self) -> Arc<ConnectorRegistry> {
+        Arc::clone(&self.connector_registry)
+    }
+
+    fn encoder_registry(&self) -> Arc<EncoderRegistry> {
+        Arc::clone(&self.encoder_registry)
+    }
+
+    fn decoder_registry(&self) -> Arc<DecoderRegistry> {
+        Arc::clone(&self.decoder_registry)
     }
 }
 
@@ -348,8 +369,13 @@ fn create_processor_from_plan_node(
     let plan_name = plan.get_plan_name();
     match plan.as_ref() {
         PhysicalPlan::DataSource(ds) => {
+            let schema = ds.schema();
+            let decoder = context
+                .decoder_registry()
+                .instantiate(ds.decoder(), ds.source_name(), Arc::clone(&schema))
+                .map_err(|err| ProcessorError::InvalidConfiguration(err.to_string()))?;
             let processor =
-                DataSourceProcessor::new(&plan_name, ds.source_name().to_string(), ds.schema());
+                DataSourceProcessor::new(&plan_name, ds.source_name().to_string(), schema, decoder);
             Ok(ProcessorBuildOutput::with_processor(
                 PlanProcessor::DataSource(processor),
             ))
@@ -384,14 +410,20 @@ fn create_processor_from_plan_node(
             )))
         }
         PhysicalPlan::Encoder(encoder) => {
-            let encoder_impl = instantiate_encoder(&encoder.encoder);
+            let encoder_impl = context
+                .encoder_registry()
+                .instantiate(encoder.encoder.kind(), &encoder.encoder)
+                .map_err(|err| ProcessorError::InvalidConfiguration(err.to_string()))?;
             let processor = EncoderProcessor::new(plan_name.clone(), encoder_impl);
             Ok(ProcessorBuildOutput::with_processor(
                 PlanProcessor::Encoder(processor),
             ))
         }
         PhysicalPlan::StreamingEncoder(streaming) => {
-            let encoder_impl = instantiate_encoder(&streaming.encoder);
+            let encoder_impl = context
+                .encoder_registry()
+                .instantiate(streaming.encoder.kind(), &streaming.encoder)
+                .map_err(|err| ProcessorError::InvalidConfiguration(err.to_string()))?;
             let processor = StreamingEncoderProcessor::new(
                 plan_name.clone(),
                 encoder_impl,
@@ -410,11 +442,15 @@ fn create_processor_from_plan_node(
             } else {
                 processor.disable_result_forwarding();
             }
-            let connector_impl = instantiate_connector(
-                &sink_plan.connector.sink_id,
-                &sink_plan.connector.connector,
-                context,
-            )?;
+            let connector_impl = context
+                .connector_registry()
+                .instantiate_sink(
+                    sink_plan.connector.connector.kind(),
+                    &sink_plan.connector.sink_id,
+                    &sink_plan.connector.connector,
+                    context.mqtt_clients_ref(),
+                )
+                .map_err(|err| ProcessorError::InvalidConfiguration(err.to_string()))?;
             processor.add_connector(connector_impl);
             Ok(ProcessorBuildOutput::with_processor(PlanProcessor::Sink(
                 processor,
@@ -649,6 +685,9 @@ fn connect_processors(
 pub fn create_processor_pipeline(
     physical_plan: Arc<PhysicalPlan>,
     mqtt_clients: MqttClientManager,
+    connector_registry: Arc<ConnectorRegistry>,
+    encoder_registry: Arc<EncoderRegistry>,
+    decoder_registry: Arc<DecoderRegistry>,
 ) -> Result<ProcessorPipeline, ProcessorError> {
     // Print the PhysicalPlan topology structure for debugging
     println!("=== PhysicalPlan Topology Structure ===");
@@ -665,7 +704,12 @@ pub fn create_processor_pipeline(
     control_source.add_control_input(control_signal_receiver);
 
     let mut processor_map = ProcessorMap::new();
-    let context = ProcessorBuilderContext::new(mqtt_clients);
+    let context = ProcessorBuilderContext::new(
+        mqtt_clients,
+        connector_registry,
+        encoder_registry,
+        decoder_registry,
+    );
     build_processors_recursive(Arc::clone(&physical_plan), &mut processor_map, &context)?;
 
     connect_processors(
@@ -713,30 +757,10 @@ pub fn create_processor_pipeline(
     })
 }
 
-fn instantiate_encoder(cfg: &SinkEncoderConfig) -> Arc<dyn CollectionEncoder> {
-    match cfg {
-        SinkEncoderConfig::Json { encoder_id } => Arc::new(JsonEncoder::new(encoder_id.clone())),
-    }
-}
-
-fn instantiate_connector(
-    sink_id: &str,
-    cfg: &SinkConnectorConfig,
-    context: &ProcessorBuilderContext,
-) -> Result<Box<dyn SinkConnector>, ProcessorError> {
-    match cfg {
-        SinkConnectorConfig::Mqtt(mqtt_cfg) => Ok(Box::new(MqttSinkConnector::new(
-            sink_id.to_string(),
-            mqtt_cfg.clone(),
-            context.mqtt_clients(),
-        ))),
-        SinkConnectorConfig::Nop(_) => Ok(Box::new(NopSinkConnector::new(sink_id.to_string()))),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::StreamDecoderConfig;
     use crate::expr::ScalarExpr;
     use crate::planner::physical::{PhysicalDataSource, PhysicalProject, PhysicalProjectField};
     use datatypes::{ConcreteDatatype, Schema, Value};
@@ -751,6 +775,7 @@ mod tests {
             "test_source".to_string(),
             None,
             schema,
+            StreamDecoderConfig::json_default("test_source"),
             0,
         )));
 
@@ -772,7 +797,15 @@ mod tests {
         )));
 
         // Try to create a processor from the PhysicalProject
-        let context = ProcessorBuilderContext::new(MqttClientManager::new());
+        let connector_registry = ConnectorRegistry::with_builtin_sinks();
+        let encoder_registry = EncoderRegistry::with_builtin_encoders();
+        let decoder_registry = DecoderRegistry::with_builtin_decoders();
+        let context = ProcessorBuilderContext::new(
+            MqttClientManager::new(),
+            connector_registry,
+            encoder_registry,
+            decoder_registry,
+        );
         let result = create_processor_from_plan_node(&physical_project, &context)
             .expect("processor creation failed");
 
