@@ -165,8 +165,7 @@ pub fn create_logical_plan(
         let field_name = select_field
             .alias
             .clone()
-            .unwrap_or_else(|| select_field.expr.to_string());
-
+            .unwrap_or_else(|| select_field.field_name.clone());
         project_fields.push(project::ProjectField {
             field_name,
             expr: select_field.expr.clone(), // Keep original sqlparser expression
