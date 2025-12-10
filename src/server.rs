@@ -258,7 +258,9 @@ fn generate_profile(duration: u64) -> Result<Vec<u8>, String> {
     let report = run_profiler(duration)?;
     let profile = report.pprof().map_err(|err| err.to_string())?;
     let mut body = Vec::new();
-    profile.encode(&mut body).map_err(|err| err.to_string())?;
+    profile
+        .write_to_vec(&mut body)
+        .map_err(|err| err.to_string())?;
     Ok(body)
 }
 
