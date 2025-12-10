@@ -5,6 +5,11 @@ use datatypes::{ConcreteDatatype, Value};
 #[derive(Debug)]
 pub struct SumFunction;
 
+impl Default for SumFunction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl SumFunction {
     pub fn new() -> Self {
         Self
@@ -72,7 +77,7 @@ impl SumAccumulator {
 
 impl AggregateAccumulator for SumAccumulator {
     fn update(&mut self, args: &[Value]) -> Result<(), String> {
-        let Some(value) = args.get(0) else {
+        let Some(value) = args.first() else {
             return Err("SUM expects one argument".to_string());
         };
         self.acc = Self::add_values(self.acc.take(), value.clone())?;
