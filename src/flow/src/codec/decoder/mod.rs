@@ -36,6 +36,8 @@ pub struct JsonDecoder {
     stream_name: String,
     schema: Arc<Schema>,
     schema_keys: Vec<Arc<str>>,
+    #[allow(dead_code)]
+    props: JsonMap<String, JsonValue>,
 }
 
 impl JsonDecoder {
@@ -44,16 +46,22 @@ impl JsonDecoder {
         schema: Arc<Schema>,
         props: JsonMap<String, JsonValue>,
     ) -> Self {
+        let stream_name = stream_name.into();
+        println!(
+            "[JsonDecoder] stream={} props={}",
+            stream_name,
+            JsonValue::Object(props.clone())
+        );
         let schema_keys = schema
             .column_schemas()
             .iter()
             .map(|col| Arc::<str>::from(col.name.as_str()))
             .collect();
-        let _ = props;
         Self {
-            stream_name: stream_name.into(),
+            stream_name,
             schema,
             schema_keys,
+            props,
         }
     }
 
