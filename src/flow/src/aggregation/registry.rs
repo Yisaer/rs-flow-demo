@@ -4,7 +4,7 @@ use parser::aggregate_registry::AggregateRegistry;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-pub trait AggregateAccumulator: Send {
+pub trait AggregateAccumulator: Send + Sync {
     fn update(&mut self, args: &[Value]) -> Result<(), String>;
     fn finalize(&self) -> Value;
 }

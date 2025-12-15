@@ -424,15 +424,18 @@ mod tests {
             Arc::clone(&aggregate_registry),
         );
 
-        let schema = Arc::new(Schema::new(vec![ColumnSchema::new(
-            "stream".to_string(),
-            "a".to_string(),
-            ConcreteDatatype::Int64(Int64Type),
-        ), ColumnSchema::new(
-            "stream".to_string(),
-            "b".to_string(),
-            ConcreteDatatype::Int64(Int64Type),
-        )]));
+        let schema = Arc::new(Schema::new(vec![
+            ColumnSchema::new(
+                "stream".to_string(),
+                "a".to_string(),
+                ConcreteDatatype::Int64(Int64Type),
+            ),
+            ColumnSchema::new(
+                "stream".to_string(),
+                "b".to_string(),
+                ConcreteDatatype::Int64(Int64Type),
+            ),
+        ]));
         let definition = StreamDefinition::new(
             "stream",
             Arc::clone(&schema),
@@ -472,15 +475,15 @@ mod tests {
         let pre_explain =
             PipelineExplain::new(Arc::clone(&logical_plan), Arc::clone(&physical_plan));
         let pre_table = pre_explain.physical.table_string();
-  //       let expected_pre = r"- id                                     | info
-  // PhysicalResultCollect_6                | sink_count=1
-  // └─PhysicalDataSink_4                   | sink_id=test_sink, connector=nop
-  //   └─PhysicalEncoder_5                  | sink_id=test_sink, encoder=json
-  //     └─PhysicalProject_3                | fields=[col_1]
-  //       └─PhysicalAggregation_2          | calls=[sum(a) -> col_1], group_by=[b]
-  //         └─PhysicalTumblingWindow_1     | kind=tumbling, unit=Seconds, length=10
-  //           └─PhysicalDataSource_0       | source=stream, decoder=json, schema=[a, b]";
-  //       assert_eq!(pre_table.trim_end(), expected_pre);
+        //       let expected_pre = r"- id                                     | info
+        // PhysicalResultCollect_6                | sink_count=1
+        // └─PhysicalDataSink_4                   | sink_id=test_sink, connector=nop
+        //   └─PhysicalEncoder_5                  | sink_id=test_sink, encoder=json
+        //     └─PhysicalProject_3                | fields=[col_1]
+        //       └─PhysicalAggregation_2          | calls=[sum(a) -> col_1], group_by=[b]
+        //         └─PhysicalTumblingWindow_1     | kind=tumbling, unit=Seconds, length=10
+        //           └─PhysicalDataSource_0       | source=stream, decoder=json, schema=[a, b]";
+        //       assert_eq!(pre_table.trim_end(), expected_pre);
         println!("{}", pre_table);
 
         let optimized_plan = optimize_physical_plan(
@@ -490,14 +493,14 @@ mod tests {
         );
         let post_explain = PipelineExplain::new(logical_plan, Arc::clone(&optimized_plan));
         let post_table = post_explain.physical.table_string();
-  //       let expected_post = r"- id                                     | info
-  // PhysicalResultCollect_6                | sink_count=1
-  // └─PhysicalDataSink_4                   | sink_id=test_sink, connector=nop
-  //   └─PhysicalEncoder_5                  | sink_id=test_sink, encoder=json
-  //     └─PhysicalProject_3                | fields=[col_1]
-  //       └─PhysicalStreamingAggregation_2 | calls=[sum(a) -> col_1], window=tumbling, unit=Seconds, length=10
-  //         └─PhysicalDataSource_0         | source=stream, decoder=json, schema=[a]";
-  //       assert_eq!(post_table.trim_end(), expected_post);
+        //       let expected_post = r"- id                                     | info
+        // PhysicalResultCollect_6                | sink_count=1
+        // └─PhysicalDataSink_4                   | sink_id=test_sink, connector=nop
+        //   └─PhysicalEncoder_5                  | sink_id=test_sink, encoder=json
+        //     └─PhysicalProject_3                | fields=[col_1]
+        //       └─PhysicalStreamingAggregation_2 | calls=[sum(a) -> col_1], window=tumbling, unit=Seconds, length=10
+        //         └─PhysicalDataSource_0         | source=stream, decoder=json, schema=[a]";
+        //       assert_eq!(post_table.trim_end(), expected_post);
         println!("{}", post_table);
     }
 }
