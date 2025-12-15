@@ -72,7 +72,7 @@ impl AggregationProcessor {
         aggregate_registry: &Arc<AggregateFunctionRegistry>,
         collection: &dyn Collection,
     ) -> Result<Box<dyn Collection>, String> {
-        use crate::model::{RecordBatch, Tuple};
+        use crate::model::RecordBatch;
         use std::collections::hash_map::Entry;
         use std::collections::HashMap;
 
@@ -85,10 +85,11 @@ impl AggregationProcessor {
         // Group states keyed by evaluated group-by values.
         struct GroupState {
             accumulators: Vec<Box<dyn AggregateAccumulator>>,
-            last_tuple: Tuple,
+            last_row_idx: usize,
             key_values: Vec<Value>,
         }
 
+        let rows = collection.rows();
         let mut groups: HashMap<String, GroupState> = HashMap::new();
 
         for row_idx in 0..num_rows {
@@ -106,14 +107,14 @@ impl AggregationProcessor {
                         Self::create_accumulators_static(physical_aggregation, aggregate_registry)?;
                     v.insert(GroupState {
                         accumulators,
-                        last_tuple: collection.rows()[row_idx].clone(),
+                        last_row_idx: row_idx,
                         key_values: key_values.clone(),
                     })
                 }
             };
 
             // Update last tuple for this group to the current row.
-            entry.last_tuple = collection.rows()[row_idx].clone();
+            entry.last_row_idx = row_idx;
 
             // Update aggregates for this group.
             for call_args in &aggregate_args {
@@ -139,6 +140,7 @@ impl AggregationProcessor {
                 physical_aggregation,
                 &mut accumulators,
                 None,
+                rows,
                 &[],
                 &group_by.is_simple_expr,
             )?;
@@ -153,7 +155,8 @@ impl AggregationProcessor {
             let tuple = Self::finalize_group(
                 physical_aggregation,
                 &mut state.accumulators,
-                Some(state.last_tuple),
+                Some(state.last_row_idx),
+                rows,
                 &state.key_values,
                 &group_by.is_simple_expr,
             )?;
@@ -365,7 +368,8 @@ impl AggregationProcessor {
     fn finalize_group(
         physical_aggregation: &PhysicalAggregation,
         accumulators: &mut [Box<dyn AggregateAccumulator>],
-        last_tuple: Option<crate::model::Tuple>,
+        last_row_idx: Option<usize>,
+        all_rows: &[crate::model::Tuple],
         key_values: &[Value],
         group_by_simple_flags: &[bool],
     ) -> Result<crate::model::Tuple, String> {
@@ -390,7 +394,13 @@ impl AggregationProcessor {
             }
         }
 
-        let mut tuple = last_tuple.unwrap_or_else(|| crate::model::Tuple::new(vec![]));
+        let mut tuple = match last_row_idx {
+            Some(idx) => all_rows
+                .get(idx)
+                .cloned()
+                .ok_or_else(|| format!("row index {} out of bounds", idx))?,
+            None => crate::model::Tuple::new(vec![]),
+        };
         let mut affiliate = tuple
             .affiliate
             .take()
