@@ -418,9 +418,7 @@ impl Processor for StreamingCountAggregationProcessor {
                                     Ok(outputs) => {
                                         for out in outputs {
                                             let data = StreamData::Collection(out);
-                                            if let Err(e) = send_with_backpressure(&output, data).await {
-                                                return Err(e);
-                                            }
+                                            send_with_backpressure(&output, data).await?
                                         }
                                     }
                                     Err(e) => {
@@ -571,9 +569,7 @@ impl Processor for StreamingTumblingAggregationProcessor {
                         match window_state.handle_tick(&mut worker) {
                             Ok(Some(batch)) => {
                                 let data = StreamData::Collection(batch);
-                                if let Err(e) = send_with_backpressure(&output, data).await {
-                                    return Err(e);
-                                }
+                                send_with_backpressure(&output, data).await?
                             }
                             Ok(None) => {}
                             Err(err) => {
@@ -589,9 +585,7 @@ impl Processor for StreamingTumblingAggregationProcessor {
                                     Ok(outputs) => {
                                         for out in outputs {
                                             let data = StreamData::Collection(out);
-                                            if let Err(e) = send_with_backpressure(&output, data).await {
-                                                return Err(e);
-                                            }
+                                            send_with_backpressure(&output, data).await?
                                         }
                                     }
                                     Err(e) => {
