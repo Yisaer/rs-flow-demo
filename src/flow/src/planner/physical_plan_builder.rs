@@ -237,6 +237,21 @@ fn create_physical_window_with_builder(
                 crate::planner::physical::PhysicalCountWindow::new(count, physical_children, index);
             PhysicalPlan::CountWindow(count_window)
         }
+        LogicalWindowSpec::Sliding {
+            time_unit,
+            lookback,
+            lookahead,
+        } => {
+            let index = builder.allocate_index();
+            let sliding = crate::planner::physical::PhysicalSlidingWindow::new(
+                time_unit,
+                lookback,
+                lookahead,
+                physical_children,
+                index,
+            );
+            PhysicalPlan::SlidingWindow(sliding)
+        }
     };
 
     Ok(Arc::new(physical))

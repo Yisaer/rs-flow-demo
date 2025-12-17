@@ -527,6 +527,9 @@ fn create_processor_from_plan_node(
                 PlanProcessor::TumblingWindow(processor),
             ))
         }
+        PhysicalPlan::SlidingWindow(_) => Err(ProcessorError::InvalidConfiguration(
+            "Sliding window processor not implemented yet".to_string(),
+        )),
         PhysicalPlan::DataSink(sink_plan) => {
             let processor_id = format!("{}_{}", plan_name, sink_plan.connector.sink_id);
             let mut processor = SinkProcessor::new(processor_id);

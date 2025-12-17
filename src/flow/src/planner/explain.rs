@@ -234,6 +234,19 @@ fn build_logical_node(plan: &Arc<LogicalPlan>) -> ExplainNode {
                 info.push("kind=count".to_string());
                 info.push(format!("count={}", count));
             }
+            LogicalWindowSpec::Sliding {
+                time_unit,
+                lookback,
+                lookahead,
+            } => {
+                info.push("kind=sliding".to_string());
+                info.push(format!("unit={:?}", time_unit));
+                info.push(format!("lookback={}", lookback));
+                match lookahead {
+                    Some(lookahead) => info.push(format!("lookahead={}", lookahead)),
+                    None => info.push("lookahead=none".to_string()),
+                }
+            }
         },
     }
 
@@ -382,6 +395,15 @@ fn build_physical_node(plan: &Arc<PhysicalPlan>) -> ExplainNode {
         PhysicalPlan::CountWindow(window) => {
             info.push("kind=count".to_string());
             info.push(format!("count={}", window.count));
+        }
+        PhysicalPlan::SlidingWindow(window) => {
+            info.push("kind=sliding".to_string());
+            info.push(format!("unit={:?}", window.time_unit));
+            info.push(format!("lookback={}", window.lookback));
+            match window.lookahead {
+                Some(lookahead) => info.push(format!("lookahead={}", lookahead)),
+                None => info.push("lookahead=none".to_string()),
+            }
         }
     }
 
