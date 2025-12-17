@@ -237,8 +237,8 @@ impl Processor for TumblingWatermarkProcessor {
 ///   active timer (`next_sleep`) that sleeps until the current earliest deadline.
 /// - When `next_sleep` fires, we pop that earliest deadline and emit a `StreamData::Watermark`
 ///   for it, then rebuild `next_sleep` for the next earliest deadline (if any).
-/// This avoids unbounded numbers of concurrent timers while still emitting per-tuple deadlines
-/// at precise times.
+///   This avoids unbounded numbers of concurrent timers while still emitting per-tuple deadlines
+///   at precise times.
 pub struct SlidingWatermarkProcessor {
     id: String,
     lookahead: Duration,
