@@ -1,4 +1,3 @@
-use crate::catalog::StreamDecoderConfig;
 use crate::planner::physical::BasePhysicalPlan;
 use datatypes::Schema;
 use std::sync::Arc;
@@ -13,7 +12,6 @@ pub struct PhysicalDataSource {
     pub source_name: String,
     pub alias: Option<String>,
     pub schema: Arc<Schema>,
-    pub decoder: StreamDecoderConfig,
 }
 
 impl PhysicalDataSource {
@@ -22,7 +20,6 @@ impl PhysicalDataSource {
         source_name: String,
         alias: Option<String>,
         schema: Arc<Schema>,
-        decoder: StreamDecoderConfig,
         index: i64,
     ) -> Self {
         let base = BasePhysicalPlan::new_leaf(index);
@@ -31,7 +28,6 @@ impl PhysicalDataSource {
             source_name,
             alias,
             schema,
-            decoder,
         }
     }
 
@@ -45,9 +41,5 @@ impl PhysicalDataSource {
 
     pub fn schema(&self) -> Arc<Schema> {
         Arc::clone(&self.schema)
-    }
-
-    pub fn decoder(&self) -> &StreamDecoderConfig {
-        &self.decoder
     }
 }

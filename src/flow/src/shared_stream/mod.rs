@@ -1,7 +1,9 @@
 use crate::codec::RecordDecoder;
 use crate::connector::SourceConnector;
 use crate::processor::base::DEFAULT_CHANNEL_CAPACITY;
-use crate::processor::{ControlSignal, DataSourceProcessor, Processor, ProcessorError, StreamData};
+use crate::processor::{
+    ControlSignal, DataSourceProcessor, DecoderProcessor, Processor, ProcessorError, StreamData,
+};
 use datatypes::Schema;
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
@@ -272,7 +274,8 @@ struct SharedStreamInner {
 
 /// Join handles that should be awaited when shutting down the stream.
 struct SharedStreamHandles {
-    processor: Option<JoinHandle<Result<(), ProcessorError>>>,
+    datasource: Option<JoinHandle<Result<(), ProcessorError>>>,
+    decoder: Option<JoinHandle<Result<(), ProcessorError>>>,
     forward: Option<JoinHandle<()>>,
     control_forward: Option<JoinHandle<()>>,
     data_anchor: Option<broadcast::Receiver<StreamData>>,
@@ -299,28 +302,36 @@ impl SharedStreamInner {
                 "shared stream requires exactly one source connector".into(),
             )
         })?;
-        let ingest_id = format!("shared_ingest_{}", stream_name);
-        let mut processor = DataSourceProcessor::with_custom_id(
+        let datasource_id = format!("shared:{}/PhysicalDataSource_0", stream_name);
+        let decoder_id = format!("shared:{}/PhysicalDecoder_1", stream_name);
+        let mut datasource = DataSourceProcessor::with_custom_id(
             None,
-            ingest_id,
+            datasource_id,
             stream_name.clone(),
             Arc::clone(&schema),
-            decoder,
         );
         let connector_id = connector.id().to_string();
-        processor.add_connector(connector);
+        datasource.add_connector(connector);
 
-        let mut data_rx = processor
+        let datasource_data_rx = datasource
             .subscribe_output()
             .ok_or_else(|| SharedStreamError::Internal("datasource output unavailable".into()))?;
-        let mut control_rx = processor.subscribe_control_output().ok_or_else(|| {
+        let mut control_rx = datasource.subscribe_control_output().ok_or_else(|| {
             SharedStreamError::Internal("datasource control output unavailable".into())
         })?;
 
         let (control_input_tx, control_input_rx) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
-        processor.add_control_input(control_input_rx);
+        datasource.add_control_input(control_input_rx);
 
-        let processor_handle = processor.start();
+        let mut decoder_processor = DecoderProcessor::with_custom_id(decoder_id, decoder);
+        decoder_processor.add_input(datasource_data_rx);
+        decoder_processor.add_control_input(control_input_tx.subscribe());
+        let mut data_rx = decoder_processor
+            .subscribe_output()
+            .ok_or_else(|| SharedStreamError::Internal("decoder output unavailable".into()))?;
+
+        let datasource_handle = datasource.start();
+        let decoder_handle = decoder_processor.start();
 
         let (data_sender, _) = broadcast::channel(channel_capacity);
         let (control_sender, _) = broadcast::channel(channel_capacity);
@@ -379,7 +390,8 @@ impl SharedStreamInner {
             control_sender,
             control_input: control_input_tx,
             handles: Mutex::new(SharedStreamHandles {
-                processor: Some(processor_handle),
+                datasource: Some(datasource_handle),
+                decoder: Some(decoder_handle),
                 forward: Some(forward),
                 control_forward: Some(control_forward),
                 data_anchor: Some(data_anchor),
@@ -468,12 +480,22 @@ impl SharedStreamInner {
         }
         handles.data_anchor.take();
         handles.control_anchor.take();
-        if let Some(handle) = handles.processor.take() {
+        if let Some(handle) = handles.decoder.take() {
             match handle.await {
                 Ok(result) => result.map_err(|err| SharedStreamError::Internal(err.to_string()))?,
                 Err(join_err) => {
                     return Err(SharedStreamError::Internal(format!(
-                        "processor join error: {join_err}"
+                        "decoder join error: {join_err}"
+                    )))
+                }
+            }
+        }
+        if let Some(handle) = handles.datasource.take() {
+            match handle.await {
+                Ok(result) => result.map_err(|err| SharedStreamError::Internal(err.to_string()))?,
+                Err(join_err) => {
+                    return Err(SharedStreamError::Internal(format!(
+                        "datasource join error: {join_err}"
                     )))
                 }
             }

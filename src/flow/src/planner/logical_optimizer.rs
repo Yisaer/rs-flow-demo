@@ -272,7 +272,10 @@ impl<'a> ColumnUsageCollector<'a> {
     fn build_pruned_binding(&self) -> SchemaBinding {
         let mut entries = Vec::new();
         for entry in self.bindings.entries() {
-            let should_keep_full = self.prune_disabled.contains(&entry.source_name)
+            let should_keep_full = matches!(
+                entry.kind,
+                crate::expr::sql_conversion::SourceBindingKind::Shared
+            ) || self.prune_disabled.contains(&entry.source_name)
                 || !self.used_columns.contains_key(&entry.source_name);
 
             let schema = if should_keep_full {
