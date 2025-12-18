@@ -261,15 +261,35 @@ fn build_logical_node(plan: &Arc<LogicalPlan>) -> ExplainNode {
 }
 
 fn build_physical_node(plan: &Arc<PhysicalPlan>) -> ExplainNode {
+    build_physical_node_with_prefix(plan, None, None)
+}
+
+fn build_physical_node_with_prefix(
+    plan: &Arc<PhysicalPlan>,
+    id_prefix: Option<&str>,
+    scope_info: Option<&str>,
+) -> ExplainNode {
     let mut info = Vec::new();
+    if let Some(scope_info) = scope_info {
+        info.push(scope_info.to_string());
+    }
     match plan.as_ref() {
         PhysicalPlan::DataSource(ds) => {
             info.push(format!("source={}", ds.source_name()));
             if let Some(alias) = ds.alias() {
                 info.push(format!("alias={}", alias));
             }
-            info.push(format!("decoder={}", ds.decoder().kind()));
             let cols: Vec<String> = ds
+                .schema()
+                .column_schemas()
+                .iter()
+                .map(|c| c.name.clone())
+                .collect();
+            info.push(format!("schema=[{}]", cols.join(", ")));
+        }
+        PhysicalPlan::Decoder(decoder) => {
+            info.push(format!("decoder={}", decoder.decoder().kind()));
+            let cols: Vec<String> = decoder
                 .schema()
                 .column_schemas()
                 .iter()
@@ -443,10 +463,28 @@ fn build_physical_node(plan: &Arc<PhysicalPlan>) -> ExplainNode {
         }
     }
 
-    let children = plan.children().iter().map(build_physical_node).collect();
+    let mut children: Vec<ExplainNode> = plan
+        .children()
+        .iter()
+        .map(|child| build_physical_node_with_prefix(child, id_prefix, scope_info))
+        .collect();
+
+    if let PhysicalPlan::SharedStream(shared) = plan.as_ref() {
+        if let Some(ingest_plan) = shared.explain_ingest_plan() {
+            let prefix = format!("shared/{}/", shared.stream_name());
+            children.push(build_physical_node_with_prefix(
+                &ingest_plan,
+                Some(prefix.as_str()),
+                Some("scope=shared_stream"),
+            ));
+        }
+    }
 
     ExplainNode {
-        id: plan.get_plan_name(),
+        id: match id_prefix {
+            Some(prefix) => format!("{}{}", prefix, plan.get_plan_name()),
+            None => plan.get_plan_name(),
+        },
         operator: plan.get_plan_type().to_string(),
         info,
         children,

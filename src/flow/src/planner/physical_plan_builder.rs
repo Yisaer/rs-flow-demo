@@ -9,9 +9,10 @@ use crate::planner::logical::{
 };
 use crate::planner::physical::physical_project::PhysicalProjectField;
 use crate::planner::physical::{
-    PhysicalAggregation, PhysicalBatch, PhysicalDataSink, PhysicalDataSource, PhysicalEncoder,
-    PhysicalFilter, PhysicalPlan, PhysicalProject, PhysicalResultCollect, PhysicalSharedStream,
-    PhysicalSinkConnector, PhysicalWatermark, WatermarkConfig, WatermarkStrategy,
+    PhysicalAggregation, PhysicalBatch, PhysicalDataSink, PhysicalDataSource, PhysicalDecoder,
+    PhysicalEncoder, PhysicalFilter, PhysicalPlan, PhysicalProject, PhysicalResultCollect,
+    PhysicalSharedStream, PhysicalSinkConnector, PhysicalWatermark, WatermarkConfig,
+    WatermarkStrategy,
 };
 use crate::planner::sink::{PipelineSink, PipelineSinkConnector};
 use crate::PipelineRegistries;
@@ -310,7 +311,7 @@ fn create_physical_data_source_with_builder(
     _logical_plan: &Arc<LogicalPlan>,
     index: i64,
     bindings: &SchemaBinding,
-    _builder: &mut PhysicalPlanBuilder,
+    builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
     let entry = find_binding_entry(logical_ds, bindings)?;
     let schema = entry.schema.clone();
@@ -319,17 +320,44 @@ fn create_physical_data_source_with_builder(
             let physical_ds = PhysicalDataSource::new(
                 logical_ds.source_name.clone(),
                 logical_ds.alias.clone(),
-                schema,
-                logical_ds.decoder().clone(),
+                Arc::clone(&schema),
                 index,
             );
-            Ok(Arc::new(PhysicalPlan::DataSource(physical_ds)))
+            let datasource_plan = Arc::new(PhysicalPlan::DataSource(physical_ds));
+            let decoder_index = builder.allocate_index();
+            let decoder = PhysicalDecoder::new(
+                logical_ds.source_name.clone(),
+                logical_ds.decoder().clone(),
+                schema,
+                vec![datasource_plan],
+                decoder_index,
+            );
+            Ok(Arc::new(PhysicalPlan::Decoder(decoder)))
         }
         SourceBindingKind::Shared => {
+            let explain_ingest_plan = {
+                let ds = PhysicalDataSource::new(
+                    logical_ds.source_name.clone(),
+                    logical_ds.alias.clone(),
+                    Arc::clone(&schema),
+                    0,
+                );
+                let ds_plan = Arc::new(PhysicalPlan::DataSource(ds));
+                let decoder = PhysicalDecoder::new(
+                    logical_ds.source_name.clone(),
+                    logical_ds.decoder().clone(),
+                    Arc::clone(&schema),
+                    vec![ds_plan],
+                    1,
+                );
+                Arc::new(PhysicalPlan::Decoder(decoder))
+            };
             let physical_shared = PhysicalSharedStream::new(
                 logical_ds.source_name.clone(),
                 logical_ds.alias.clone(),
                 schema,
+                logical_ds.decoder().clone(),
+                Some(explain_ingest_plan),
                 index,
             );
             Ok(Arc::new(PhysicalPlan::SharedStream(physical_shared)))

@@ -1,9 +1,8 @@
-//! DataSourceProcessor - processes data from PhysicalDatasource
+//! DataSourceProcessor - reads raw payloads from connectors.
 //!
-//! This processor reads data from a PhysicalDatasource and sends it downstream
-//! as StreamData::Collection.
+//! This processor reads data from a data source and sends it downstream as
+//! `StreamData::Bytes`. Decoding is handled by a dedicated decoder processor.
 
-use crate::codec::RecordDecoder;
 use crate::connector::{ConnectorError, ConnectorEvent, SourceConnector};
 use crate::processor::base::{
     fan_in_control_streams, fan_in_streams, forward_error, log_received_data,
@@ -39,8 +38,6 @@ pub struct DataSourceProcessor {
     control_output: broadcast::Sender<ControlSignal>,
     /// External source connectors that feed this processor
     connectors: Vec<ConnectorBinding>,
-    /// Decoder used for raw byte payloads
-    default_decoder: Arc<dyn RecordDecoder>,
 }
 
 static DATASOURCE_RECORDS_IN: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -149,18 +146,12 @@ impl ConnectorBinding {
 }
 impl DataSourceProcessor {
     /// Create a new DataSourceProcessor from PhysicalDatasource
-    pub fn new(
-        plan_name: &str,
-        source_name: impl Into<String>,
-        schema: Arc<Schema>,
-        decoder: Arc<dyn RecordDecoder>,
-    ) -> Self {
+    pub fn new(plan_name: &str, source_name: impl Into<String>, schema: Arc<Schema>) -> Self {
         Self::with_custom_id(
             None, // plan_index is no longer needed as we use plan_name for ID
             plan_name.to_string(),
             source_name,
             schema,
-            decoder,
         )
     }
 
@@ -169,7 +160,6 @@ impl DataSourceProcessor {
         id: impl Into<String>,
         source_name: impl Into<String>,
         schema: Arc<Schema>,
-        decoder: Arc<dyn RecordDecoder>,
     ) -> Self {
         let (output, _) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
         let (control_output, _) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
@@ -184,7 +174,6 @@ impl DataSourceProcessor {
             output,
             control_output,
             connectors: Vec::new(),
-            default_decoder: decoder,
         }
     }
 
@@ -224,7 +213,6 @@ impl Processor for DataSourceProcessor {
     fn start(&mut self) -> tokio::task::JoinHandle<Result<(), ProcessorError>> {
         let output = self.output.clone();
         let control_output = self.control_output.clone();
-        let decoder = Arc::clone(&self.default_decoder);
         let processor_id = self.id.clone();
         let plan_label = self
             .plan_index
@@ -264,20 +252,8 @@ impl Processor for DataSourceProcessor {
                     }
                     item = input_streams.next() => {
                         match item {
-                            Some(Ok(mut data)) => {
+                            Some(Ok(data)) => {
                                 log_received_data(&processor_id, &data);
-                                if let StreamData::Bytes(payload) = &data {
-                                    match decoder.decode(payload) {
-                                        Ok(batch) => {
-                                            data = StreamData::collection(Box::new(batch));
-                                        }
-                                        Err(err) => {
-                                            let message = format!("decode error: {}", err);
-                                            forward_error(&output, &processor_id, message).await?;
-                                            continue;
-                                        }
-                                    }
-                                }
                                 if let Some(collection) = data.as_collection() {
                                     let rows = collection.num_rows() as u64;
                                     DATASOURCE_RECORDS_IN

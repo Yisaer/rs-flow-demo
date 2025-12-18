@@ -9,8 +9,8 @@ use crate::connector::{ConnectorRegistry, MqttClientManager};
 use crate::planner::physical::PhysicalPlan;
 use crate::processor::{
     AggregationProcessor, BatchProcessor, ControlSignal, ControlSourceProcessor,
-    DataSourceProcessor, EncoderProcessor, FilterProcessor, Processor, ProcessorError,
-    ProjectProcessor, ResultCollectProcessor, SharedStreamProcessor, SinkProcessor,
+    DataSourceProcessor, DecoderProcessor, EncoderProcessor, FilterProcessor, Processor,
+    ProcessorError, ProjectProcessor, ResultCollectProcessor, SharedStreamProcessor, SinkProcessor,
     SlidingWindowProcessor, StreamData, StreamingAggregationProcessor, StreamingEncoderProcessor,
     TumblingWindowProcessor, WatermarkProcessor,
 };
@@ -28,6 +28,8 @@ pub enum PlanProcessor {
     Aggregation(AggregationProcessor),
     /// DataSourceProcessor created from PhysicalDatasource
     DataSource(DataSourceProcessor),
+    /// DecoderProcessor created from PhysicalDecoder
+    Decoder(DecoderProcessor),
     /// SharedStreamProcessor created from PhysicalSharedStream
     SharedSource(SharedStreamProcessor),
     /// ProjectProcessor created from PhysicalProject
@@ -107,6 +109,7 @@ impl PlanProcessor {
         match self {
             PlanProcessor::Aggregation(p) => p.id(),
             PlanProcessor::DataSource(p) => p.id(),
+            PlanProcessor::Decoder(p) => p.id(),
             PlanProcessor::SharedSource(p) => p.id(),
             PlanProcessor::Project(p) => p.id(),
             PlanProcessor::Filter(p) => p.id(),
@@ -133,6 +136,7 @@ impl PlanProcessor {
         match self {
             PlanProcessor::Aggregation(p) => p.start(),
             PlanProcessor::DataSource(p) => p.start(),
+            PlanProcessor::Decoder(p) => p.start(),
             PlanProcessor::SharedSource(p) => p.start(),
             PlanProcessor::Project(p) => p.start(),
             PlanProcessor::Filter(p) => p.start(),
@@ -153,6 +157,7 @@ impl PlanProcessor {
         match self {
             PlanProcessor::Aggregation(p) => p.subscribe_output(),
             PlanProcessor::DataSource(p) => p.subscribe_output(),
+            PlanProcessor::Decoder(p) => p.subscribe_output(),
             PlanProcessor::SharedSource(p) => p.subscribe_output(),
             PlanProcessor::Project(p) => p.subscribe_output(),
             PlanProcessor::Filter(p) => p.subscribe_output(),
@@ -173,6 +178,7 @@ impl PlanProcessor {
         match self {
             PlanProcessor::Aggregation(p) => p.subscribe_control_output(),
             PlanProcessor::DataSource(p) => p.subscribe_control_output(),
+            PlanProcessor::Decoder(p) => p.subscribe_control_output(),
             PlanProcessor::SharedSource(p) => p.subscribe_control_output(),
             PlanProcessor::Project(p) => p.subscribe_control_output(),
             PlanProcessor::Filter(p) => p.subscribe_control_output(),
@@ -193,6 +199,7 @@ impl PlanProcessor {
         match self {
             PlanProcessor::Aggregation(p) => p.add_input(receiver),
             PlanProcessor::DataSource(p) => p.add_input(receiver),
+            PlanProcessor::Decoder(p) => p.add_input(receiver),
             PlanProcessor::SharedSource(p) => p.add_input(receiver),
             PlanProcessor::Project(p) => p.add_input(receiver),
             PlanProcessor::Filter(p) => p.add_input(receiver),
@@ -213,6 +220,7 @@ impl PlanProcessor {
         match self {
             PlanProcessor::Aggregation(p) => p.add_control_input(receiver),
             PlanProcessor::DataSource(p) => p.add_control_input(receiver),
+            PlanProcessor::Decoder(p) => p.add_control_input(receiver),
             PlanProcessor::SharedSource(p) => p.add_control_input(receiver),
             PlanProcessor::Project(p) => p.add_control_input(receiver),
             PlanProcessor::Filter(p) => p.add_control_input(receiver),
@@ -420,14 +428,25 @@ fn create_processor_from_plan_node(
     match plan.as_ref() {
         PhysicalPlan::DataSource(ds) => {
             let schema = ds.schema();
-            let decoder = context
-                .decoder_registry()
-                .instantiate(ds.decoder(), ds.source_name(), Arc::clone(&schema))
-                .map_err(|err| ProcessorError::InvalidConfiguration(err.to_string()))?;
             let processor =
-                DataSourceProcessor::new(&plan_name, ds.source_name().to_string(), schema, decoder);
+                DataSourceProcessor::new(&plan_name, ds.source_name().to_string(), schema);
             Ok(ProcessorBuildOutput::with_processor(
                 PlanProcessor::DataSource(processor),
+            ))
+        }
+        PhysicalPlan::Decoder(decoder_plan) => {
+            let schema = decoder_plan.schema();
+            let decoder = context
+                .decoder_registry()
+                .instantiate(
+                    decoder_plan.decoder(),
+                    decoder_plan.source_name(),
+                    Arc::clone(&schema),
+                )
+                .map_err(|err| ProcessorError::InvalidConfiguration(err.to_string()))?;
+            let processor = DecoderProcessor::new(plan_name.clone(), decoder);
+            Ok(ProcessorBuildOutput::with_processor(
+                PlanProcessor::Decoder(processor),
             ))
         }
         PhysicalPlan::SharedStream(shared) => {
@@ -872,7 +891,9 @@ mod tests {
     use super::*;
     use crate::catalog::StreamDecoderConfig;
     use crate::expr::ScalarExpr;
-    use crate::planner::physical::{PhysicalDataSource, PhysicalProject, PhysicalProjectField};
+    use crate::planner::physical::{
+        PhysicalDataSource, PhysicalDecoder, PhysicalProject, PhysicalProjectField,
+    };
     use datatypes::{ConcreteDatatype, Schema, Value};
     use sqlparser::ast::{Expr, Value as SqlValue};
     use std::sync::Arc;
@@ -884,9 +905,15 @@ mod tests {
         let data_source = Arc::new(PhysicalPlan::DataSource(PhysicalDataSource::new(
             "test_source".to_string(),
             None,
-            schema,
-            StreamDecoderConfig::json(),
+            Arc::clone(&schema),
             0,
+        )));
+        let decoded_source = Arc::new(PhysicalPlan::Decoder(PhysicalDecoder::new(
+            "test_source".to_string(),
+            StreamDecoderConfig::json(),
+            Arc::clone(&schema),
+            vec![data_source],
+            1,
         )));
 
         // Create a projection field
@@ -902,8 +929,8 @@ mod tests {
         // Create a PhysicalProject
         let physical_project = Arc::new(PhysicalPlan::Project(PhysicalProject::with_single_child(
             vec![project_field],
-            data_source,
-            1,
+            decoded_source,
+            2,
         )));
 
         // Try to create a processor from the PhysicalProject
@@ -924,7 +951,7 @@ mod tests {
         let processor = result
             .processor
             .expect("expected processor for physical project node");
-        assert_eq!(processor.id(), "PhysicalProject_1");
+        assert_eq!(processor.id(), "PhysicalProject_2");
         println!(
             "✅ SUCCESS: PhysicalProject processor created with ID: {}",
             processor.id()
