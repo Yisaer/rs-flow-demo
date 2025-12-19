@@ -279,21 +279,21 @@ fn create_physical_window_with_builder(
             PhysicalPlan::SlidingWindow(sliding)
         }
         LogicalWindowSpec::State { open, emit } => {
-            let open_scalar = convert_expr_to_scalar_with_bindings(open, bindings)
+            let open_scalar = convert_expr_to_scalar_with_bindings(open.as_ref(), bindings)
                 .map_err(|err| err.to_string())?;
-            let emit_scalar = convert_expr_to_scalar_with_bindings(emit, bindings)
+            let emit_scalar = convert_expr_to_scalar_with_bindings(emit.as_ref(), bindings)
                 .map_err(|err| err.to_string())?;
 
             let index = builder.allocate_index();
             let state = crate::planner::physical::PhysicalStateWindow::new(
-                open.clone(),
-                emit.clone(),
+                open.as_ref().clone(),
+                emit.as_ref().clone(),
                 open_scalar,
                 emit_scalar,
                 physical_children,
                 index,
             );
-            PhysicalPlan::StateWindow(state)
+            PhysicalPlan::StateWindow(Box::new(state))
         }
     };
 

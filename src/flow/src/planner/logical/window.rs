@@ -24,8 +24,8 @@ pub enum LogicalWindowSpec {
         lookahead: Option<u64>,
     },
     State {
-        open: Expr,
-        emit: Expr,
+        open: Box<Expr>,
+        emit: Box<Expr>,
     },
 }
 

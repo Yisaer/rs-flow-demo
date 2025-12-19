@@ -249,8 +249,8 @@ fn build_logical_node(plan: &Arc<LogicalPlan>) -> ExplainNode {
             }
             LogicalWindowSpec::State { open, emit } => {
                 info.push("kind=state".to_string());
-                info.push(format!("open={}", open));
-                info.push(format!("emit={}", emit));
+                info.push(format!("open={}", open.as_ref()));
+                info.push(format!("emit={}", emit.as_ref()));
             }
         },
     }

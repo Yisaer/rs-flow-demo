@@ -52,7 +52,7 @@ pub enum PhysicalPlan {
     TumblingWindow(PhysicalTumblingWindow),
     CountWindow(PhysicalCountWindow),
     SlidingWindow(PhysicalSlidingWindow),
-    StateWindow(PhysicalStateWindow),
+    StateWindow(Box<PhysicalStateWindow>),
     Watermark(PhysicalWatermark),
 }
 

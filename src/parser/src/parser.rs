@@ -433,8 +433,8 @@ mod source_info_tests {
 
         match select_stmt.window {
             Some(Window::State { open, emit }) => {
-                assert_eq!(open.to_string(), "a > 0");
-                assert_eq!(emit.to_string(), "b = 1");
+                assert_eq!(open.as_ref().to_string(), "a > 0");
+                assert_eq!(emit.as_ref().to_string(), "b = 1");
             }
             other => panic!("expected state window, got {:?}", other),
         }
@@ -451,8 +451,8 @@ mod source_info_tests {
 
         match select_stmt.window {
             Some(Window::State { open, emit }) => {
-                assert_eq!(open.to_string(), "a > 0");
-                assert_eq!(emit.to_string(), "b = 1");
+                assert_eq!(open.as_ref().to_string(), "a > 0");
+                assert_eq!(emit.as_ref().to_string(), "b = 1");
             }
             other => panic!("expected state window, got {:?}", other),
         }

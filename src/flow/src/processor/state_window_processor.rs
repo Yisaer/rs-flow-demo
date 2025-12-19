@@ -43,7 +43,9 @@ impl StateWindowProcessor {
 
     pub fn from_physical_plan(id: impl Into<String>, plan: Arc<PhysicalPlan>) -> Option<Self> {
         match plan.as_ref() {
-            PhysicalPlan::StateWindow(window) => Some(Self::new(id, Arc::new(window.clone()))),
+            PhysicalPlan::StateWindow(window) => {
+                Some(Self::new(id, Arc::new(window.as_ref().clone())))
+            }
             _ => None,
         }
     }

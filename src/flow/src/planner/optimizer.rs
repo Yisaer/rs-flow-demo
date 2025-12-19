@@ -333,9 +333,9 @@ fn rebuild_with_children(
             Arc::new(PhysicalPlan::SlidingWindow(new))
         }
         PhysicalPlan::StateWindow(window) => {
-            let mut new = window.clone();
+            let mut new = window.as_ref().clone();
             new.base.children = children;
-            Arc::new(PhysicalPlan::StateWindow(new))
+            Arc::new(PhysicalPlan::StateWindow(Box::new(new)))
         }
         PhysicalPlan::DataSink(sink) => {
             let mut new = sink.clone();

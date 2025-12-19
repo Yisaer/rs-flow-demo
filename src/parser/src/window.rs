@@ -21,7 +21,7 @@ pub enum Window {
     /// State window driven by two boolean conditions:
     /// - `open`: when the window starts collecting state
     /// - `emit`: when the window emits its current state
-    State { open: Expr, emit: Expr },
+    State { open: Box<Expr>, emit: Box<Expr> },
 }
 
 /// Supported time units for window definitions.
@@ -48,7 +48,10 @@ impl Window {
     }
 
     pub fn state(open: Expr, emit: Expr) -> Self {
-        Window::State { open, emit }
+        Window::State {
+            open: Box::new(open),
+            emit: Box::new(emit),
+        }
     }
 
     fn function_name(&self) -> &'static str {
@@ -110,9 +113,10 @@ pub fn window_to_expr(window: &Window) -> Expr {
             }
             args
         }
-        Window::State { open, emit } => {
-            vec![make_expr_arg(open.clone()), make_expr_arg(emit.clone())]
-        }
+        Window::State { open, emit } => vec![
+            make_expr_arg(open.as_ref().clone()),
+            make_expr_arg(emit.as_ref().clone()),
+        ],
     };
 
     Expr::Function(Function {
