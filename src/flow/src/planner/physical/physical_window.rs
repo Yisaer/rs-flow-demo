@@ -78,6 +78,7 @@ pub struct PhysicalStateWindow {
 }
 
 impl PhysicalStateWindow {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         open_expr: Expr,
         emit_expr: Expr,

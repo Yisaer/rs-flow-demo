@@ -202,14 +202,14 @@ impl Processor for StreamingStateAggregationProcessor {
                                         if open {
                                             entry.active = true;
                                             if let Err(e) = entry.worker.update_groups(&tuple) {
-                                                forward_error(&output, &id, format!("{e}")).await?;
+                                                forward_error(&output, &id, e.to_string()).await?;
                                             }
                                         }
                                         continue;
                                     }
 
                                     if let Err(e) = entry.worker.update_groups(&tuple) {
-                                        forward_error(&output, &id, format!("{e}")).await?;
+                                        forward_error(&output, &id, e.to_string()).await?;
                                         continue;
                                     }
 
@@ -220,7 +220,7 @@ impl Processor for StreamingStateAggregationProcessor {
                                             }
                                             Ok(None) => {}
                                             Err(e) => {
-                                                forward_error(&output, &id, format!("{e}")).await?;
+                                                forward_error(&output, &id, e.to_string()).await?;
                                             }
                                         }
                                         entry.active = false;
@@ -244,7 +244,7 @@ impl Processor for StreamingStateAggregationProcessor {
                                                     }
                                                     Ok(None) => {}
                                                     Err(e) => {
-                                                        forward_error(&output, &id, format!("{e}")).await?;
+                                                        forward_error(&output, &id, e.to_string()).await?;
                                                     }
                                                 }
                                                 state.active = false;

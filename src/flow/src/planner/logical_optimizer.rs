@@ -95,20 +95,20 @@ impl<'a> ColumnUsageCollector<'a> {
                     self.collect_expr(expr);
                 }
             }
-            LogicalPlan::Window(window) => match &window.spec {
-                crate::planner::logical::LogicalWindowSpec::State {
+            LogicalPlan::Window(window) => {
+                if let crate::planner::logical::LogicalWindowSpec::State {
                     open,
                     emit,
                     partition_by,
-                } => {
+                } = &window.spec
+                {
                     self.collect_expr(open.as_ref());
                     self.collect_expr(emit.as_ref());
                     for expr in partition_by {
                         self.collect_expr(expr);
                     }
                 }
-                _ => {}
-            },
+            }
             LogicalPlan::DataSource(_) => {}
             LogicalPlan::DataSink(_) => {}
             LogicalPlan::Tail(TailPlan { .. }) => {}
