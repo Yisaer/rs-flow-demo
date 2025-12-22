@@ -182,6 +182,63 @@ pub async fn create_pipeline_handler(
         }
     }
 
+    if req.options.plan_cache.enabled {
+        match state.instance.create_pipeline_with_logical_ir(definition) {
+            Ok((snapshot, logical_ir)) => {
+                match storage_bridge::build_plan_snapshot(
+                    state.storage.as_ref(),
+                    &stored.id,
+                    &stored.raw_json,
+                    &snapshot.streams,
+                    logical_ir,
+                )
+                .and_then(|record| {
+                    state
+                        .storage
+                        .put_plan_snapshot(record)
+                        .map_err(|e| e.to_string())
+                }) {
+                    Ok(()) => {}
+                    Err(err) => {
+                        let _ = state.instance.delete_pipeline(&stored.id).await;
+                        let _ = state.storage.delete_pipeline(&stored.id);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("pipeline {} created but failed to persist plan cache: {err}", req.id),
+                        )
+                            .into_response();
+                    }
+                }
+
+                println!("[manager] pipeline {} created", snapshot.definition.id());
+                return (
+                    StatusCode::CREATED,
+                    Json(CreatePipelineResponse {
+                        id: snapshot.definition.id().to_string(),
+                        status: status_label(snapshot.status),
+                    }),
+                )
+                    .into_response();
+            }
+            Err(PipelineError::AlreadyExists(_)) => {
+                let _ = state.storage.delete_pipeline(&stored.id);
+                return (
+                    StatusCode::CONFLICT,
+                    format!("pipeline {} already exists", req.id),
+                )
+                    .into_response();
+            }
+            Err(err) => {
+                let _ = state.storage.delete_pipeline(&stored.id);
+                return (
+                    StatusCode::BAD_REQUEST,
+                    format!("failed to create pipeline {}: {err}", req.id),
+                )
+                    .into_response();
+            }
+        }
+    }
+
     match state.instance.create_pipeline(definition) {
         Ok(snapshot) => {
             println!("[manager] pipeline {} created", snapshot.definition.id());

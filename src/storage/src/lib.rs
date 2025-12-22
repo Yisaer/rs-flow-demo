@@ -154,7 +154,21 @@ impl MetadataStorage {
     }
 
     pub fn delete_pipeline(&self, id: &str) -> Result<(), StorageError> {
-        self.delete_entry(PIPELINES_TABLE, id)
+        let txn = self.db.begin_write().map_err(StorageError::backend)?;
+        {
+            let mut pipelines = txn.open_table(PIPELINES_TABLE).map_err(StorageError::backend)?;
+            let removed = pipelines.remove(id).map_err(StorageError::backend)?;
+            if removed.is_none() {
+                return Err(StorageError::NotFound(id.to_string()));
+            }
+
+            let mut snapshots = txn
+                .open_table(PLAN_SNAPSHOTS_TABLE)
+                .map_err(StorageError::backend)?;
+            let _ = snapshots.remove(id).map_err(StorageError::backend)?;
+        }
+        txn.commit().map_err(StorageError::backend)?;
+        Ok(())
     }
 
     pub fn put_plan_snapshot(&self, snapshot: StoredPlanSnapshot) -> Result<(), StorageError> {
@@ -465,7 +479,6 @@ mod tests {
 
         storage.delete_stream(&stream.id).unwrap();
         storage.delete_pipeline(&pipeline.id).unwrap();
-        storage.delete_plan_snapshot(&snapshot.pipeline_id).unwrap();
         storage.delete_mqtt_config(&mqtt.key).unwrap();
 
         assert!(storage.get_stream(&stream.id).unwrap().is_none());
@@ -510,7 +523,8 @@ mod tests {
 
         manager.delete_stream(&stream.id).unwrap();
         manager.delete_pipeline(&pipeline.id).unwrap();
-        manager.delete_plan_snapshot(&snapshot.pipeline_id).unwrap();
         manager.delete_mqtt_config(&mqtt.key).unwrap();
+
+        assert!(manager.get_plan_snapshot(&snapshot.pipeline_id).unwrap().is_none());
     }
 }

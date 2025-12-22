@@ -20,6 +20,37 @@ fn fnv1a_64_hex(input: &str) -> String {
     format!("{hash:016x}")
 }
 
+pub(crate) fn build_plan_snapshot(
+    storage: &StorageManager,
+    pipeline_id: &str,
+    pipeline_raw_json: &str,
+    stream_ids: &[String],
+    logical_plan_ir: Vec<u8>,
+) -> Result<storage::StoredPlanSnapshot, String> {
+    let pipeline_json_hash = fnv1a_64_hex(pipeline_raw_json);
+    let mut stream_json_hashes = Vec::with_capacity(stream_ids.len());
+    for stream_id in stream_ids {
+        let stream = storage
+            .get_stream(stream_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("stream {stream_id} missing from storage"))?;
+        stream_json_hashes.push((stream_id.clone(), fnv1a_64_hex(&stream.raw_json)));
+    }
+    stream_json_hashes.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let flow_build_id = build_info::build_id();
+    let fingerprint = format!("{pipeline_json_hash}:{flow_build_id}");
+
+    Ok(storage::StoredPlanSnapshot {
+        pipeline_id: pipeline_id.to_string(),
+        fingerprint,
+        pipeline_json_hash,
+        stream_json_hashes,
+        flow_build_id,
+        logical_plan_ir,
+    })
+}
+
 /// Serialize a create-stream request for storage.
 pub fn stored_stream_from_request(req: &CreateStreamRequest) -> Result<StoredStream, String> {
     let raw_json =
@@ -164,6 +195,21 @@ pub async fn load_from_storage(
             } else {
                 println!("[plan_cache] miss pipeline {}", pipeline.id);
             }
+
+            let (snapshot, logical_ir) = instance
+                .create_pipeline_with_logical_ir(def)
+                .map_err(|e| e.to_string())?;
+            let stored_snapshot = build_plan_snapshot(
+                storage,
+                &pipeline.id,
+                &pipeline.raw_json,
+                &snapshot.streams,
+                logical_ir,
+            )?;
+            storage
+                .put_plan_snapshot(stored_snapshot)
+                .map_err(|e| e.to_string())?;
+            continue;
         }
 
         instance.create_pipeline(def).map_err(|e| e.to_string())?;
