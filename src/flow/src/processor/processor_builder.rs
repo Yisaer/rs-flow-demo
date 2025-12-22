@@ -516,6 +516,13 @@ fn collect_shared_source_requirements(
                 collect_columns_from_scalar_expr(scalar, requirements, all_sources);
             }
         }
+        PhysicalPlan::StateWindow(window) => {
+            collect_columns_from_scalar_expr(&window.open_scalar, requirements, all_sources);
+            collect_columns_from_scalar_expr(&window.emit_scalar, requirements, all_sources);
+            for scalar in &window.partition_by_scalars {
+                collect_columns_from_scalar_expr(scalar, requirements, all_sources);
+            }
+        }
         _ => {}
     }
 
