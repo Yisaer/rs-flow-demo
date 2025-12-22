@@ -76,7 +76,6 @@ This feature stores snapshots in the existing metadata storage (`redb`) by addin
 - `pipeline_id`
 - `fingerprint`
 - `flow_build_id`
-- `snapshot_format_version`
 - `logical_plan_ir_bytes`
 - `physical_plan_ir_bytes`
 - optional metadata: `created_at`, size, etc.
@@ -113,4 +112,3 @@ Log requirements are intentionally minimal:
   - plan cache miss (pipeline id)
 
 No miss reason is required for this iteration.
-

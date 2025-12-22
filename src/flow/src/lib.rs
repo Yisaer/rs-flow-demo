@@ -5,6 +5,7 @@ pub mod connector;
 pub mod expr;
 pub mod instance;
 pub mod model;
+pub mod plan_cache;
 pub mod pipeline;
 pub mod planner;
 pub mod processor;

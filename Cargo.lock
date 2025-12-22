@@ -330,6 +330,7 @@ name = "flow"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "bincode",
  "datatypes",
  "futures",
  "once_cell",

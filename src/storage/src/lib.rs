@@ -69,8 +69,6 @@ pub struct StoredPlanSnapshot {
     pub fingerprint: String,
     /// Flow build identifier (e.g. commit id + git tag).
     pub flow_build_id: String,
-    /// Snapshot payload version for compatibility checks.
-    pub snapshot_format_version: u32,
     /// Serialized optimized logical plan IR.
     pub logical_plan_ir: Vec<u8>,
     /// Serialized optimized physical plan IR.
@@ -409,7 +407,6 @@ mod tests {
             pipeline_id: "pipe_1".to_string(),
             fingerprint: "fp_a".to_string(),
             flow_build_id: "sha:deadbeef tag:v0.0.0".to_string(),
-            snapshot_format_version: 1,
             logical_plan_ir: vec![1, 2, 3],
             physical_plan_ir: vec![4, 5, 6],
         }
