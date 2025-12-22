@@ -40,6 +40,21 @@ pub struct CreatePipelineRequest {
     pub sql: String,
     #[serde(default)]
     pub sinks: Vec<CreatePipelineSinkRequest>,
+    #[serde(default)]
+    pub options: PipelineOptionsRequest,
+}
+
+#[derive(Deserialize, Serialize, Default, Clone)]
+#[serde(default)]
+pub struct PipelineOptionsRequest {
+    #[serde(rename = "plan_cache")]
+    pub plan_cache: PlanCacheOptionsRequest,
+}
+
+#[derive(Deserialize, Serialize, Default, Clone)]
+#[serde(default)]
+pub struct PlanCacheOptionsRequest {
+    pub enabled: bool,
 }
 
 #[derive(Serialize)]
