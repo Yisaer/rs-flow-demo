@@ -1,11 +1,8 @@
-use crate::aggregation::AggregateFunctionRegistry;
 use crate::catalog::{Catalog, StreamDefinition, StreamProps};
-use crate::codec::{DecoderRegistry, EncoderRegistry};
 use crate::connector::{
-    register_mock_source_handle, ConnectorRegistry, MockSourceConnector, MqttClientManager,
-    MqttSinkConfig, MqttSourceConfig, MqttSourceConnector,
+    register_mock_source_handle, MockSourceConnector, MqttClientManager, MqttSinkConfig,
+    MqttSourceConfig, MqttSourceConnector,
 };
-use crate::expr::custom_func::CustomFuncRegistry;
 use crate::expr::sql_conversion::{SchemaBinding, SchemaBindingEntry, SourceBindingKind};
 use crate::planner::logical::create_logical_plan;
 use crate::planner::plan_cache::{logical_plan_from_ir, sources_from_logical_ir, LogicalPlanIR};
@@ -14,7 +11,6 @@ use crate::processor::create_processor_pipeline;
 use crate::processor::processor_builder::{PlanProcessor, ProcessorPipeline};
 use crate::processor::Processor;
 use crate::shared_stream::SharedStreamRegistry;
-use crate::stateful::StatefulFunctionRegistry;
 use crate::{
     create_physical_plan, create_pipeline, explain_pipeline, optimize_logical_plan,
     optimize_physical_plan, PipelineExplain, PipelineRegistries, PipelineSink,
@@ -213,12 +209,7 @@ pub struct PipelineManager {
     catalog: Arc<Catalog>,
     shared_stream_registry: &'static SharedStreamRegistry,
     mqtt_client_manager: MqttClientManager,
-    connector_registry: Arc<ConnectorRegistry>,
-    encoder_registry: Arc<EncoderRegistry>,
-    decoder_registry: Arc<DecoderRegistry>,
-    aggregate_registry: Arc<AggregateFunctionRegistry>,
-    stateful_registry: Arc<StatefulFunctionRegistry>,
-    custom_func_registry: Arc<CustomFuncRegistry>,
+    registries: PipelineRegistries,
 }
 
 impl PipelineManager {
@@ -226,24 +217,14 @@ impl PipelineManager {
         catalog: Arc<Catalog>,
         shared_stream_registry: &'static SharedStreamRegistry,
         mqtt_client_manager: MqttClientManager,
-        connector_registry: Arc<ConnectorRegistry>,
-        decoder_registry: Arc<DecoderRegistry>,
-        encoder_registry: Arc<EncoderRegistry>,
-        aggregate_registry: Arc<AggregateFunctionRegistry>,
-        stateful_registry: Arc<StatefulFunctionRegistry>,
-        custom_func_registry: Arc<CustomFuncRegistry>,
+        registries: PipelineRegistries,
     ) -> Self {
         Self {
             pipelines: RwLock::new(HashMap::new()),
             catalog,
             shared_stream_registry,
             mqtt_client_manager,
-            connector_registry,
-            encoder_registry,
-            decoder_registry,
-            aggregate_registry,
-            stateful_registry,
-            custom_func_registry,
+            registries,
         }
     }
 
@@ -253,20 +234,12 @@ impl PipelineManager {
         definition: PipelineDefinition,
     ) -> Result<PipelineSnapshot, PipelineError> {
         let pipeline_id = definition.id().to_string();
-        let registries = PipelineRegistries::new_with_stateful_and_custom_registries(
-            Arc::clone(&self.connector_registry),
-            Arc::clone(&self.encoder_registry),
-            Arc::clone(&self.decoder_registry),
-            Arc::clone(&self.aggregate_registry),
-            Arc::clone(&self.stateful_registry),
-            Arc::clone(&self.custom_func_registry),
-        );
         let (pipeline, streams) = build_pipeline_runtime(
             &definition,
             &self.catalog,
             self.shared_stream_registry,
             &self.mqtt_client_manager,
-            &registries,
+            &self.registries,
         )
         .map_err(PipelineError::BuildFailure)?;
         let mut guard = self.pipelines.write().expect("pipeline manager poisoned");
@@ -289,20 +262,12 @@ impl PipelineManager {
         definition: PipelineDefinition,
     ) -> Result<(PipelineSnapshot, Vec<u8>), PipelineError> {
         let pipeline_id = definition.id().to_string();
-        let registries = PipelineRegistries::new_with_stateful_and_custom_registries(
-            Arc::clone(&self.connector_registry),
-            Arc::clone(&self.encoder_registry),
-            Arc::clone(&self.decoder_registry),
-            Arc::clone(&self.aggregate_registry),
-            Arc::clone(&self.stateful_registry),
-            Arc::clone(&self.custom_func_registry),
-        );
         let (pipeline, streams, logical_ir) = build_pipeline_runtime_with_logical_ir(
             &definition,
             &self.catalog,
             self.shared_stream_registry,
             &self.mqtt_client_manager,
-            &registries,
+            &self.registries,
         )
         .map_err(PipelineError::BuildFailure)?;
         let mut guard = self.pipelines.write().expect("pipeline manager poisoned");
@@ -373,22 +338,13 @@ impl PipelineManager {
             }
         }
 
-        let registries = PipelineRegistries::new_with_stateful_and_custom_registries(
-            Arc::clone(&self.connector_registry),
-            Arc::clone(&self.encoder_registry),
-            Arc::clone(&self.decoder_registry),
-            Arc::clone(&self.aggregate_registry),
-            Arc::clone(&self.stateful_registry),
-            Arc::clone(&self.custom_func_registry),
-        );
-
         let (pipeline, streams) = build_pipeline_runtime_from_logical_ir(
             &definition,
             logical_plan_ir,
             &self.catalog,
             self.shared_stream_registry,
             &self.mqtt_client_manager,
-            &registries,
+            &self.registries,
         )
         .map_err(PipelineError::BuildFailure)?;
 
@@ -428,21 +384,13 @@ impl PipelineManager {
 
         let sinks =
             build_sinks_from_definition(&definition).map_err(PipelineError::BuildFailure)?;
-        let registries = PipelineRegistries::new_with_stateful_and_custom_registries(
-            Arc::clone(&self.connector_registry),
-            Arc::clone(&self.encoder_registry),
-            Arc::clone(&self.decoder_registry),
-            Arc::clone(&self.aggregate_registry),
-            Arc::clone(&self.stateful_registry),
-            Arc::clone(&self.custom_func_registry),
-        );
 
         explain_pipeline(
             definition.sql(),
             sinks,
             &self.catalog,
             self.shared_stream_registry,
-            &registries,
+            &self.registries,
         )
         .map_err(|err| PipelineError::BuildFailure(err.to_string()))
     }
@@ -804,14 +752,17 @@ pub fn attach_sources_for_pipeline(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::aggregation::AggregateFunctionRegistry;
     use crate::catalog::{
         Catalog, MqttStreamProps, StreamDecoderConfig, StreamDefinition, StreamProps,
     };
-    use crate::codec::{EncoderRegistry, JsonDecoder};
+    use crate::codec::{DecoderRegistry, EncoderRegistry, JsonDecoder};
     use crate::connector::MockSourceConnector;
     use crate::connector::{ConnectorRegistry, MqttClientManager};
+    use crate::expr::custom_func::CustomFuncRegistry;
     use crate::shared_stream::SharedStreamConfig;
     use crate::shared_stream_registry;
+    use crate::stateful::StatefulFunctionRegistry;
     use datatypes::{ColumnSchema, ConcreteDatatype, Int64Type, Schema};
     use serde_json::Map as JsonMap;
     use std::sync::Arc;
@@ -866,16 +817,19 @@ mod tests {
         let stateful_registry = StatefulFunctionRegistry::with_builtins();
         let custom_func_registry = CustomFuncRegistry::with_builtins();
         install_stream(&catalog, "test_stream");
+        let registries = PipelineRegistries::new_with_stateful_and_custom_registries(
+            Arc::clone(&connector_registry),
+            Arc::clone(&encoder_registry),
+            Arc::clone(&decoder_registry),
+            Arc::clone(&aggregate_registry),
+            Arc::clone(&stateful_registry),
+            Arc::clone(&custom_func_registry),
+        );
         let manager = PipelineManager::new(
             Arc::clone(&catalog),
             registry,
             mqtt_manager.clone(),
-            Arc::clone(&connector_registry),
-            Arc::clone(&decoder_registry),
-            Arc::clone(&encoder_registry),
-            Arc::clone(&aggregate_registry),
-            Arc::clone(&stateful_registry),
-            Arc::clone(&custom_func_registry),
+            registries,
         );
         let snapshot = manager
             .create_pipeline(sample_pipeline("pipe_a", "test_stream"))
@@ -902,16 +856,19 @@ mod tests {
         let stateful_registry = StatefulFunctionRegistry::with_builtins();
         let custom_func_registry = CustomFuncRegistry::with_builtins();
         install_stream(&catalog, "dup_stream");
+        let registries = PipelineRegistries::new_with_stateful_and_custom_registries(
+            connector_registry,
+            encoder_registry,
+            decoder_registry,
+            aggregate_registry,
+            stateful_registry,
+            custom_func_registry,
+        );
         let manager = PipelineManager::new(
             Arc::clone(&catalog),
             registry,
             mqtt_manager.clone(),
-            connector_registry,
-            decoder_registry,
-            encoder_registry,
-            aggregate_registry,
-            stateful_registry,
-            custom_func_registry,
+            registries,
         );
         manager
             .create_pipeline(sample_pipeline("dup_pipe", "dup_stream"))

@@ -49,16 +49,19 @@ impl FlowInstance {
         let aggregate_registry = AggregateFunctionRegistry::with_builtins();
         let stateful_registry = StatefulFunctionRegistry::with_builtins();
         let custom_func_registry = CustomFuncRegistry::with_builtins();
+        let registries = PipelineRegistries::new_with_stateful_and_custom_registries(
+            Arc::clone(&connector_registry),
+            Arc::clone(&encoder_registry),
+            Arc::clone(&decoder_registry),
+            Arc::clone(&aggregate_registry),
+            Arc::clone(&stateful_registry),
+            Arc::clone(&custom_func_registry),
+        );
         let pipeline_manager = Arc::new(PipelineManager::new(
             Arc::clone(&catalog),
             shared_stream_registry,
             mqtt_client_manager.clone(),
-            Arc::clone(&connector_registry),
-            Arc::clone(&decoder_registry),
-            Arc::clone(&encoder_registry),
-            Arc::clone(&aggregate_registry),
-            Arc::clone(&stateful_registry),
-            Arc::clone(&custom_func_registry),
+            registries,
         ));
         Self {
             catalog,
