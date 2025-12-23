@@ -1,5 +1,6 @@
 use crate::expr::ScalarExpr;
 use crate::planner::physical::BasePhysicalPlan;
+use sqlparser::ast::Expr;
 use std::sync::Arc;
 
 use super::PhysicalPlan;
@@ -9,6 +10,7 @@ pub struct StatefulCall {
     pub output_column: String,
     pub func_name: String,
     pub arg_scalars: Vec<ScalarExpr>,
+    pub original_expr: Expr,
 }
 
 #[derive(Debug, Clone)]
@@ -25,4 +27,3 @@ impl PhysicalStatefulFunction {
         }
     }
 }
-

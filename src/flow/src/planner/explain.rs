@@ -342,14 +342,7 @@ fn build_physical_node_with_prefix(
             let mut calls = stateful
                 .calls
                 .iter()
-                .map(|call| {
-                    format!(
-                        "{}({}) -> {}",
-                        call.func_name,
-                        call.arg_scalars.len(),
-                        call.output_column
-                    )
-                })
+                .map(|call| format!("{} -> {}", call.original_expr, call.output_column))
                 .collect::<Vec<_>>();
             calls.sort();
             info.push(format!("calls=[{}]", calls.join("; ")));

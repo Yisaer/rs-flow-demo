@@ -44,6 +44,7 @@ impl StatefulFunctionProcessor {
             output_column,
             func_name,
             arg_scalars,
+            ..
         } in &physical_stateful.calls
         {
             let function = stateful_registry.get(func_name).ok_or_else(|| {
@@ -106,7 +107,7 @@ impl StatefulFunctionProcessor {
                 let out = call
                     .instance
                     .eval(&args)
-                    .map_err(|e| ProcessorError::ProcessingError(e))?;
+                    .map_err(ProcessorError::ProcessingError)?;
                 tuple.add_affiliate_column(Arc::clone(&call.output_column), out);
             }
         }

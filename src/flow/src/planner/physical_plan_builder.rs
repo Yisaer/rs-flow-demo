@@ -234,6 +234,7 @@ fn create_physical_stateful_function_with_builder(
             output_column: output_column.clone(),
             func_name,
             arg_scalars,
+            original_expr: expr.clone(),
         });
     }
 
