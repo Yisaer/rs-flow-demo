@@ -222,11 +222,7 @@ impl Processor for AggregationProcessor {
         let control_output = self.control_output.clone();
         let physical_aggregation = self.physical_aggregation.clone();
         let aggregate_registry = self.aggregate_registry.clone();
-
-        println!(
-            "[AggregationProcessor:{id}] starting with {} aggregate calls",
-            physical_aggregation.aggregate_calls.len()
-        );
+        tracing::info!(AggregationProcessor = id, "starting");
 
         tokio::spawn(async move {
             let mut control_streams = fan_in_control_streams(control_receivers);
