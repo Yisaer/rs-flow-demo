@@ -9,6 +9,7 @@ use crate::planner::plan_cache::{logical_plan_from_ir, sources_from_logical_ir, 
 use crate::planner::sink::{CommonSinkProps, SinkEncoderConfig};
 use crate::processor::create_processor_pipeline;
 use crate::processor::processor_builder::{PlanProcessor, ProcessorPipeline};
+use crate::processor::EventtimePipelineContext;
 use crate::processor::Processor;
 use crate::shared_stream::SharedStreamRegistry;
 use crate::{
@@ -586,6 +587,22 @@ fn build_pipeline_runtime_with_logical_ir(
     );
     tracing::info!(explain = %explain.to_pretty_string(), "pipeline explain");
 
+    let eventtime = if definition.options().eventtime.enabled {
+        let mut per_source = HashMap::new();
+        for (name, def) in &stream_definitions {
+            if let Some(cfg) = def.eventtime() {
+                per_source.insert(name.clone(), cfg.clone());
+            }
+        }
+        Some(EventtimePipelineContext {
+            enabled: true,
+            registry: registries.eventtime_type_registry(),
+            per_source,
+        })
+    } else {
+        None
+    };
+
     let mut pipeline = create_processor_pipeline(
         optimized_plan,
         mqtt_client_manager.clone(),
@@ -594,6 +611,7 @@ fn build_pipeline_runtime_with_logical_ir(
         registries.decoder_registry(),
         registries.aggregate_registry(),
         registries.stateful_registry(),
+        eventtime,
     )
     .map_err(|err| err.to_string())?;
     pipeline.set_pipeline_id(definition.id().to_string());
@@ -668,6 +686,22 @@ fn build_pipeline_runtime_from_logical_ir(
     let explain = PipelineExplain::new(Arc::clone(&logical_plan), Arc::clone(&optimized_plan));
     tracing::info!(explain = %explain.to_pretty_string(), "pipeline explain");
 
+    let eventtime = if definition.options().eventtime.enabled {
+        let mut per_source = HashMap::new();
+        for (name, def) in &stream_definitions {
+            if let Some(cfg) = def.eventtime() {
+                per_source.insert(name.clone(), cfg.clone());
+            }
+        }
+        Some(EventtimePipelineContext {
+            enabled: true,
+            registry: registries.eventtime_type_registry(),
+            per_source,
+        })
+    } else {
+        None
+    };
+
     let mut pipeline = create_processor_pipeline(
         optimized_plan,
         mqtt_client_manager.clone(),
@@ -676,6 +710,7 @@ fn build_pipeline_runtime_from_logical_ir(
         registries.decoder_registry(),
         registries.aggregate_registry(),
         registries.stateful_registry(),
+        eventtime,
     )
     .map_err(|err| err.to_string())?;
 

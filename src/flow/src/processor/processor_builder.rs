@@ -9,6 +9,8 @@ use crate::connector::{ConnectorRegistry, MqttClientManager};
 use crate::expr::scalar::ColumnRef;
 use crate::expr::ScalarExpr;
 use crate::planner::physical::PhysicalPlan;
+use crate::processor::decoder_processor::EventtimeDecodeConfig;
+use crate::processor::EventtimePipelineContext;
 use crate::processor::{
     AggregationProcessor, BatchProcessor, ControlSignal, ControlSourceProcessor,
     DataSourceProcessor, DecoderProcessor, EncoderProcessor, FilterProcessor, Processor,
@@ -74,6 +76,7 @@ struct ProcessorBuilderContext {
     aggregate_registry: Arc<AggregateFunctionRegistry>,
     stateful_registry: Arc<StatefulFunctionRegistry>,
     shared_source_required_columns: HashMap<String, Vec<String>>,
+    eventtime: Option<EventtimePipelineContext>,
 }
 
 impl ProcessorBuilderContext {
@@ -85,6 +88,7 @@ impl ProcessorBuilderContext {
         aggregate_registry: Arc<AggregateFunctionRegistry>,
         stateful_registry: Arc<StatefulFunctionRegistry>,
         shared_source_required_columns: HashMap<String, Vec<String>>,
+        eventtime: Option<EventtimePipelineContext>,
     ) -> Self {
         Self {
             mqtt_clients,
@@ -94,6 +98,7 @@ impl ProcessorBuilderContext {
             aggregate_registry,
             stateful_registry,
             shared_source_required_columns,
+            eventtime,
         }
     }
 
@@ -125,6 +130,10 @@ impl ProcessorBuilderContext {
         self.shared_source_required_columns
             .get(source_name)
             .cloned()
+    }
+
+    fn eventtime(&self) -> Option<EventtimePipelineContext> {
+        self.eventtime.clone()
     }
 }
 
@@ -673,7 +682,30 @@ fn create_processor_from_plan_node(
                     Arc::clone(&schema),
                 )
                 .map_err(|err| ProcessorError::InvalidConfiguration(err.to_string()))?;
-            let processor = DecoderProcessor::new(plan_name.clone(), decoder);
+            let mut processor = DecoderProcessor::new(plan_name.clone(), decoder);
+            if let Some(eventtime) = context.eventtime() {
+                if eventtime.enabled {
+                    if let Some(def) = eventtime.per_source.get(decoder_plan.source_name()) {
+                        let parser =
+                            eventtime
+                                .registry
+                                .resolve(def.eventtime_type())
+                                .map_err(|err| {
+                                    ProcessorError::InvalidConfiguration(format!(
+                                        "eventtime.type `{}` not registered: {}",
+                                        def.eventtime_type(),
+                                        err
+                                    ))
+                                })?;
+                        processor = processor.with_eventtime(EventtimeDecodeConfig {
+                            source_name: decoder_plan.source_name().to_string(),
+                            column: def.column().to_string(),
+                            type_key: def.eventtime_type().to_string(),
+                            parser,
+                        });
+                    }
+                }
+            }
             Ok(ProcessorBuildOutput::with_processor(
                 PlanProcessor::Decoder(processor),
             ))
@@ -1076,6 +1108,7 @@ pub fn create_processor_pipeline(
     decoder_registry: Arc<DecoderRegistry>,
     aggregate_registry: Arc<AggregateFunctionRegistry>,
     stateful_registry: Arc<StatefulFunctionRegistry>,
+    eventtime: Option<EventtimePipelineContext>,
 ) -> Result<ProcessorPipeline, ProcessorError> {
     let mut control_source = ControlSourceProcessor::new("control_source");
     let (pipeline_input_sender, pipeline_input_receiver) = mpsc::channel(100);
@@ -1096,6 +1129,7 @@ pub fn create_processor_pipeline(
         aggregate_registry,
         stateful_registry,
         shared_required_columns,
+        eventtime,
     );
     build_processors_recursive(Arc::clone(&physical_plan), &mut processor_map, &context)?;
 
@@ -1205,6 +1239,7 @@ mod tests {
             aggregate_registry,
             stateful_registry,
             HashMap::new(),
+            None,
         );
         let result = create_processor_from_plan_node(&physical_project, &context)
             .expect("processor creation failed");
