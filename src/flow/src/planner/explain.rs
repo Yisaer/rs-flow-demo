@@ -487,6 +487,96 @@ fn build_physical_node_with_prefix(
         PhysicalPlan::ResultCollect(rc) => {
             info.push(format!("sink_count={}", rc.base.children.len()));
         }
+        PhysicalPlan::ProcessTimeWatermark(watermark) => match &watermark.config {
+            WatermarkConfig::Tumbling {
+                time_unit,
+                length,
+                strategy,
+            } => {
+                info.push("window=tumbling".to_string());
+                info.push(format!("unit={:?}", time_unit));
+                info.push(format!("length={}", length));
+                match strategy {
+                    WatermarkStrategy::ProcessingTime { interval, .. } => {
+                        info.push("mode=processing_time".to_string());
+                        info.push(format!("interval={}", interval));
+                    }
+                    WatermarkStrategy::EventTime { late_tolerance } => {
+                        info.push("mode=event_time".to_string());
+                        info.push(format!("lateToleranceMs={}", late_tolerance.as_millis()));
+                    }
+                }
+            }
+            WatermarkConfig::Sliding {
+                time_unit,
+                lookback,
+                lookahead,
+                strategy,
+            } => {
+                info.push("window=sliding".to_string());
+                info.push(format!("unit={:?}", time_unit));
+                info.push(format!("lookback={}", lookback));
+                match lookahead {
+                    Some(lookahead) => info.push(format!("lookahead={}", lookahead)),
+                    None => info.push("lookahead=none".to_string()),
+                }
+                match strategy {
+                    WatermarkStrategy::ProcessingTime { interval, .. } => {
+                        info.push("mode=processing_time".to_string());
+                        info.push(format!("interval={}", interval));
+                    }
+                    WatermarkStrategy::EventTime { late_tolerance } => {
+                        info.push("mode=event_time".to_string());
+                        info.push(format!("lateToleranceMs={}", late_tolerance.as_millis()));
+                    }
+                }
+            }
+        },
+        PhysicalPlan::EventtimeWatermark(watermark) => match &watermark.config {
+            WatermarkConfig::Tumbling {
+                time_unit,
+                length,
+                strategy,
+            } => {
+                info.push("window=tumbling".to_string());
+                info.push(format!("unit={:?}", time_unit));
+                info.push(format!("length={}", length));
+                match strategy {
+                    WatermarkStrategy::ProcessingTime { interval, .. } => {
+                        info.push("mode=processing_time".to_string());
+                        info.push(format!("interval={}", interval));
+                    }
+                    WatermarkStrategy::EventTime { late_tolerance } => {
+                        info.push("mode=event_time".to_string());
+                        info.push(format!("lateToleranceMs={}", late_tolerance.as_millis()));
+                    }
+                }
+            }
+            WatermarkConfig::Sliding {
+                time_unit,
+                lookback,
+                lookahead,
+                strategy,
+            } => {
+                info.push("window=sliding".to_string());
+                info.push(format!("unit={:?}", time_unit));
+                info.push(format!("lookback={}", lookback));
+                match lookahead {
+                    Some(lookahead) => info.push(format!("lookahead={}", lookahead)),
+                    None => info.push("lookahead=none".to_string()),
+                }
+                match strategy {
+                    WatermarkStrategy::ProcessingTime { interval, .. } => {
+                        info.push("mode=processing_time".to_string());
+                        info.push(format!("interval={}", interval));
+                    }
+                    WatermarkStrategy::EventTime { late_tolerance } => {
+                        info.push("mode=event_time".to_string());
+                        info.push(format!("lateToleranceMs={}", late_tolerance.as_millis()));
+                    }
+                }
+            }
+        },
         PhysicalPlan::Watermark(watermark) => match &watermark.config {
             WatermarkConfig::Tumbling {
                 time_unit,

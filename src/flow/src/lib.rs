@@ -376,17 +376,16 @@ pub fn explain_pipeline_with_options(
         validate_eventtime_enabled(&stream_defs, registries)?;
     }
 
-    let physical_plan =
-        create_physical_plan(Arc::clone(&logical_plan), &pruned_binding, registries)?;
-    let mut physical_plan = physical_plan;
-    if options.eventtime.enabled {
-        crate::planner::physical::rewrite_watermark_strategy(
-            &mut physical_plan,
-            crate::planner::physical::WatermarkStrategy::EventTime {
-                late_tolerance: options.eventtime.late_tolerance,
-            },
-        );
-    }
+    let build_options = crate::planner::PhysicalPlanBuildOptions {
+        eventtime_enabled: options.eventtime.enabled,
+        eventtime_late_tolerance: options.eventtime.late_tolerance,
+    };
+    let physical_plan = crate::planner::create_physical_plan_with_build_options(
+        Arc::clone(&logical_plan),
+        &pruned_binding,
+        registries,
+        &build_options,
+    )?;
     let optimized_plan = optimize_physical_plan(
         Arc::clone(&physical_plan),
         registries.encoder_registry().as_ref(),
@@ -478,21 +477,16 @@ pub fn create_pipeline_with_attached_sources_with_options(
         validate_eventtime_enabled(&stream_defs, registries)?;
     }
 
-    let physical_plan =
-        create_physical_plan(Arc::clone(&logical_plan), &pruned_binding, registries).map(
-            |plan| {
-                let mut plan = plan;
-                if options.eventtime.enabled {
-                    crate::planner::physical::rewrite_watermark_strategy(
-                        &mut plan,
-                        crate::planner::physical::WatermarkStrategy::EventTime {
-                            late_tolerance: options.eventtime.late_tolerance,
-                        },
-                    );
-                }
-                plan
-            },
-        )?;
+    let build_options = crate::planner::PhysicalPlanBuildOptions {
+        eventtime_enabled: options.eventtime.enabled,
+        eventtime_late_tolerance: options.eventtime.late_tolerance,
+    };
+    let physical_plan = crate::planner::create_physical_plan_with_build_options(
+        Arc::clone(&logical_plan),
+        &pruned_binding,
+        registries,
+        &build_options,
+    )?;
     let optimized_plan = optimize_physical_plan(
         Arc::clone(&physical_plan),
         registries.encoder_registry().as_ref(),

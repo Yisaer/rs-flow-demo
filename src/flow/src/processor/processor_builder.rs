@@ -797,7 +797,7 @@ fn create_processor_from_plan_node(
                 PlanProcessor::StreamingEncoder(processor),
             ))
         }
-        PhysicalPlan::Watermark(_) => {
+        PhysicalPlan::ProcessTimeWatermark(_) => {
             let processor =
                 WatermarkProcessor::from_physical_plan(plan_name.clone(), Arc::clone(plan))
                     .ok_or_else(|| {
@@ -809,6 +809,12 @@ fn create_processor_from_plan_node(
                 PlanProcessor::Watermark(processor),
             ))
         }
+        PhysicalPlan::EventtimeWatermark(_) => Err(ProcessorError::InvalidConfiguration(
+            "eventtime watermark processor not implemented yet".to_string(),
+        )),
+        PhysicalPlan::Watermark(_) => Err(ProcessorError::InvalidConfiguration(
+            "PhysicalWatermark is deprecated; use PhysicalProcessTimeWatermark".to_string(),
+        )),
         PhysicalPlan::CountWindow(count_window) => {
             let processor =
                 BatchProcessor::new(plan_name.clone(), Some(count_window.count as usize), None);

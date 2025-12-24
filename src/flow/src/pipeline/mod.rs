@@ -13,9 +13,8 @@ use crate::processor::EventtimePipelineContext;
 use crate::processor::Processor;
 use crate::shared_stream::SharedStreamRegistry;
 use crate::{
-    create_physical_plan, explain_pipeline_with_options, optimize_logical_plan,
-    optimize_physical_plan, PipelineExplain, PipelineRegistries, PipelineSink,
-    PipelineSinkConnector, SinkConnectorConfig,
+    explain_pipeline_with_options, optimize_logical_plan, optimize_physical_plan, PipelineExplain,
+    PipelineRegistries, PipelineSink, PipelineSinkConnector, SinkConnectorConfig,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -558,17 +557,17 @@ fn build_pipeline_runtime_with_logical_ir(
         .encode()
         .map_err(|err| err.to_string())?;
 
-    let physical_plan =
-        create_physical_plan(Arc::clone(&logical_plan), &pruned_binding, registries)?;
-    let mut physical_plan = physical_plan;
-    if definition.options().eventtime.enabled {
-        crate::planner::physical::rewrite_watermark_strategy(
-            &mut physical_plan,
-            crate::planner::physical::WatermarkStrategy::EventTime {
-                late_tolerance: definition.options().eventtime.late_tolerance,
-            },
-        );
-    }
+    let build_options = crate::planner::PhysicalPlanBuildOptions {
+        eventtime_enabled: definition.options().eventtime.enabled,
+        eventtime_late_tolerance: definition.options().eventtime.late_tolerance,
+    };
+    let physical_plan = crate::planner::create_physical_plan_with_build_options(
+        Arc::clone(&logical_plan),
+        &pruned_binding,
+        registries,
+        &build_options,
+    )?;
+    let physical_plan = physical_plan;
     let optimized_plan = optimize_physical_plan(
         Arc::clone(&physical_plan),
         registries.encoder_registry().as_ref(),
@@ -663,18 +662,17 @@ fn build_pipeline_runtime_from_logical_ir(
         logical_plan_from_ir(&logical_ir, &datasource_inputs).map_err(|e| e.to_string())?;
     let (logical_plan, pruned_binding) = optimize_logical_plan(logical_plan, &schema_binding);
 
-    let physical_plan =
-        create_physical_plan(Arc::clone(&logical_plan), &pruned_binding, registries)
-            .map_err(|err| err.to_string())?;
-    let mut physical_plan = physical_plan;
-    if definition.options().eventtime.enabled {
-        crate::planner::physical::rewrite_watermark_strategy(
-            &mut physical_plan,
-            crate::planner::physical::WatermarkStrategy::EventTime {
-                late_tolerance: definition.options().eventtime.late_tolerance,
-            },
-        );
-    }
+    let build_options = crate::planner::PhysicalPlanBuildOptions {
+        eventtime_enabled: definition.options().eventtime.enabled,
+        eventtime_late_tolerance: definition.options().eventtime.late_tolerance,
+    };
+    let physical_plan = crate::planner::create_physical_plan_with_build_options(
+        Arc::clone(&logical_plan),
+        &pruned_binding,
+        registries,
+        &build_options,
+    )
+    .map_err(|err| err.to_string())?;
     let optimized_plan = optimize_physical_plan(
         Arc::clone(&physical_plan),
         registries.encoder_registry().as_ref(),

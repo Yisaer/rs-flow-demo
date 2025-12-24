@@ -12,12 +12,29 @@ use crate::planner::physical::physical_project::PhysicalProjectField;
 use crate::planner::physical::{
     PhysicalAggregation, PhysicalBatch, PhysicalDataSink, PhysicalDataSource, PhysicalDecoder,
     PhysicalEncoder, PhysicalFilter, PhysicalPlan, PhysicalProject, PhysicalResultCollect,
-    PhysicalSharedStream, PhysicalSinkConnector, PhysicalStatefulFunction, PhysicalWatermark,
-    StatefulCall, WatermarkConfig, WatermarkStrategy,
+    PhysicalEventtimeWatermark, PhysicalProcessTimeWatermark, PhysicalSharedStream,
+    PhysicalSinkConnector, PhysicalStatefulFunction, StatefulCall, WatermarkConfig,
+    WatermarkStrategy,
 };
 use crate::planner::sink::{PipelineSink, PipelineSinkConnector};
 use crate::PipelineRegistries;
 use std::sync::Arc;
+use std::time::Duration;
+
+#[derive(Debug, Clone, Copy)]
+pub struct PhysicalPlanBuildOptions {
+    pub eventtime_enabled: bool,
+    pub eventtime_late_tolerance: Duration,
+}
+
+impl Default for PhysicalPlanBuildOptions {
+    fn default() -> Self {
+        Self {
+            eventtime_enabled: false,
+            eventtime_late_tolerance: Duration::ZERO,
+        }
+    }
+}
 
 /// Physical plan builder that manages index allocation and node caching
 pub struct PhysicalPlanBuilder {
@@ -72,7 +89,29 @@ pub fn create_physical_plan(
     registries: &PipelineRegistries,
 ) -> Result<Arc<PhysicalPlan>, String> {
     let mut builder = PhysicalPlanBuilder::new();
-    create_physical_plan_with_builder_cached(logical_plan, bindings, registries, &mut builder)
+    create_physical_plan_with_builder_cached_with_options(
+        logical_plan,
+        bindings,
+        registries,
+        &PhysicalPlanBuildOptions::default(),
+        &mut builder,
+    )
+}
+
+pub fn create_physical_plan_with_build_options(
+    logical_plan: Arc<LogicalPlan>,
+    bindings: &SchemaBinding,
+    registries: &PipelineRegistries,
+    options: &PhysicalPlanBuildOptions,
+) -> Result<Arc<PhysicalPlan>, String> {
+    let mut builder = PhysicalPlanBuilder::new();
+    create_physical_plan_with_builder_cached_with_options(
+        logical_plan,
+        bindings,
+        registries,
+        options,
+        &mut builder,
+    )
 }
 
 /// Create a physical plan from a logical plan using centralized index management
@@ -85,17 +124,24 @@ pub fn create_physical_plan_with_builder(
     registries: &PipelineRegistries,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
-    create_physical_plan_with_builder_cached(logical_plan, bindings, registries, builder)
+    create_physical_plan_with_builder_cached_with_options(
+        logical_plan,
+        bindings,
+        registries,
+        &PhysicalPlanBuildOptions::default(),
+        builder,
+    )
 }
 
 /// Create a physical plan from a logical plan using centralized index management with node caching
 ///
 /// This function ensures that shared logical nodes are converted to shared physical nodes,
 /// maintaining the same instance across multiple references.
-fn create_physical_plan_with_builder_cached(
+fn create_physical_plan_with_builder_cached_with_options(
     logical_plan: Arc<LogicalPlan>,
     bindings: &SchemaBinding,
     registries: &PipelineRegistries,
+    options: &PhysicalPlanBuildOptions,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
     let logical_index = logical_plan.get_plan_index();
@@ -123,6 +169,7 @@ fn create_physical_plan_with_builder_cached(
                 &logical_plan,
                 bindings,
                 registries,
+                options,
                 builder,
             )?
         }
@@ -131,6 +178,7 @@ fn create_physical_plan_with_builder_cached(
             &logical_plan,
             bindings,
             registries,
+            options,
             builder,
         )?,
         LogicalPlan::Project(logical_project) => create_physical_project_with_builder_cached(
@@ -138,6 +186,7 @@ fn create_physical_plan_with_builder_cached(
             &logical_plan,
             bindings,
             registries,
+            options,
             builder,
         )?,
         LogicalPlan::Aggregation(logical_agg) => create_physical_aggregation_with_builder(
@@ -145,6 +194,7 @@ fn create_physical_plan_with_builder_cached(
             &logical_plan,
             bindings,
             registries,
+            options,
             builder,
         )?,
         LogicalPlan::DataSink(logical_sink) => create_physical_data_sink_with_builder_cached(
@@ -152,6 +202,7 @@ fn create_physical_plan_with_builder_cached(
             &logical_plan,
             bindings,
             registries,
+            options,
             builder,
         )?,
         LogicalPlan::Tail(_logical_tail) => {
@@ -161,6 +212,7 @@ fn create_physical_plan_with_builder_cached(
                 &logical_plan,
                 bindings,
                 registries,
+                options,
                 builder,
             )?
         }
@@ -169,6 +221,7 @@ fn create_physical_plan_with_builder_cached(
             &logical_plan,
             bindings,
             registries,
+            options,
             builder,
         )?,
     };
@@ -183,12 +236,19 @@ fn create_physical_stateful_function_with_builder(
     logical_plan: &Arc<LogicalPlan>,
     bindings: &SchemaBinding,
     registries: &PipelineRegistries,
+    options: &PhysicalPlanBuildOptions,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
         let physical_child =
-            create_physical_plan_with_builder_cached(child.clone(), bindings, registries, builder)?;
+            create_physical_plan_with_builder_cached_with_options(
+                child.clone(),
+                bindings,
+                registries,
+                options,
+                builder,
+            )?;
         physical_children.push(physical_child);
     }
 
@@ -257,13 +317,20 @@ fn create_physical_result_collect_from_tail_with_builder_cached(
     logical_plan: &Arc<LogicalPlan>,
     bindings: &SchemaBinding,
     registries: &PipelineRegistries,
+    options: &PhysicalPlanBuildOptions,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
     // Convert children first using the builder with caching
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
         let physical_child =
-            create_physical_plan_with_builder_cached(child.clone(), bindings, registries, builder)?;
+            create_physical_plan_with_builder_cached_with_options(
+                child.clone(),
+                bindings,
+                registries,
+                options,
+                builder,
+            )?;
         physical_children.push(physical_child);
     }
 
@@ -283,35 +350,58 @@ fn create_physical_window_with_builder(
     logical_plan: &Arc<LogicalPlan>,
     bindings: &SchemaBinding,
     registries: &PipelineRegistries,
+    options: &PhysicalPlanBuildOptions,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
         let physical_child =
-            create_physical_plan_with_builder_cached(child.clone(), bindings, registries, builder)?;
+            create_physical_plan_with_builder_cached_with_options(
+                child.clone(),
+                bindings,
+                registries,
+                options,
+                builder,
+            )?;
         physical_children.push(physical_child);
     }
 
     let physical = match &logical_window.spec {
         LogicalWindowSpec::Tumbling { time_unit, length } => {
             let watermark_index = builder.allocate_index();
-            let watermark = PhysicalWatermark::new(
-                WatermarkConfig::Tumbling {
+            let strategy = if options.eventtime_enabled {
+                WatermarkStrategy::EventTime {
+                    late_tolerance: options.eventtime_late_tolerance,
+                }
+            } else {
+                WatermarkStrategy::ProcessingTime {
                     time_unit: *time_unit,
-                    length: *length,
-                    strategy: WatermarkStrategy::ProcessingTime {
-                        time_unit: *time_unit,
-                        interval: *length,
-                    },
-                },
-                physical_children,
-                watermark_index,
-            );
+                    interval: *length,
+                }
+            };
+            let watermark_config = WatermarkConfig::Tumbling {
+                time_unit: *time_unit,
+                length: *length,
+                strategy,
+            };
+            let watermark_plan = if options.eventtime_enabled {
+                PhysicalPlan::EventtimeWatermark(PhysicalEventtimeWatermark::new(
+                    watermark_config,
+                    physical_children,
+                    watermark_index,
+                ))
+            } else {
+                PhysicalPlan::ProcessTimeWatermark(PhysicalProcessTimeWatermark::new(
+                    watermark_config,
+                    physical_children,
+                    watermark_index,
+                ))
+            };
             let index = builder.allocate_index();
             let tumbling = crate::planner::physical::PhysicalTumblingWindow::new(
                 *time_unit,
                 *length,
-                vec![Arc::new(PhysicalPlan::Watermark(watermark))],
+                vec![Arc::new(watermark_plan)],
                 index,
             );
             PhysicalPlan::TumblingWindow(tumbling)
@@ -332,21 +422,37 @@ fn create_physical_window_with_builder(
         } => {
             let (sliding_children, index) = if lookahead.is_some() {
                 let watermark_index = builder.allocate_index();
-                let watermark = PhysicalWatermark::new(
-                    WatermarkConfig::Sliding {
+                let strategy = if options.eventtime_enabled {
+                    WatermarkStrategy::EventTime {
+                        late_tolerance: options.eventtime_late_tolerance,
+                    }
+                } else {
+                    WatermarkStrategy::ProcessingTime {
                         time_unit: *time_unit,
-                        lookback: *lookback,
-                        lookahead: *lookahead,
-                        strategy: WatermarkStrategy::ProcessingTime {
-                            time_unit: *time_unit,
-                            interval: 1,
-                        },
-                    },
-                    physical_children,
-                    watermark_index,
-                );
+                        interval: 1,
+                    }
+                };
+                let watermark_config = WatermarkConfig::Sliding {
+                    time_unit: *time_unit,
+                    lookback: *lookback,
+                    lookahead: *lookahead,
+                    strategy,
+                };
+                let watermark_plan = if options.eventtime_enabled {
+                    PhysicalPlan::EventtimeWatermark(PhysicalEventtimeWatermark::new(
+                        watermark_config,
+                        physical_children,
+                        watermark_index,
+                    ))
+                } else {
+                    PhysicalPlan::ProcessTimeWatermark(PhysicalProcessTimeWatermark::new(
+                        watermark_config,
+                        physical_children,
+                        watermark_index,
+                    ))
+                };
                 (
-                    vec![Arc::new(PhysicalPlan::Watermark(watermark))],
+                    vec![Arc::new(watermark_plan)],
                     builder.allocate_index(),
                 )
             } else {
@@ -415,12 +521,19 @@ fn create_physical_aggregation_with_builder(
     logical_plan: &Arc<LogicalPlan>,
     bindings: &SchemaBinding,
     registries: &PipelineRegistries,
+    options: &PhysicalPlanBuildOptions,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
         let physical_child =
-            create_physical_plan_with_builder_cached(child.clone(), bindings, registries, builder)?;
+            create_physical_plan_with_builder_cached_with_options(
+                child.clone(),
+                bindings,
+                registries,
+                options,
+                builder,
+            )?;
         physical_children.push(physical_child);
     }
     let index = builder.allocate_index();
@@ -502,13 +615,20 @@ fn create_physical_filter_with_builder_cached(
     logical_plan: &Arc<LogicalPlan>,
     bindings: &SchemaBinding,
     registries: &PipelineRegistries,
+    options: &PhysicalPlanBuildOptions,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
     // Convert children first using the builder with caching
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
         let physical_child =
-            create_physical_plan_with_builder_cached(child.clone(), bindings, registries, builder)?;
+            create_physical_plan_with_builder_cached_with_options(
+                child.clone(),
+                bindings,
+                registries,
+                options,
+                builder,
+            )?;
         physical_children.push(physical_child);
     }
 
@@ -541,13 +661,20 @@ fn create_physical_project_with_builder_cached(
     logical_plan: &Arc<LogicalPlan>,
     bindings: &SchemaBinding,
     registries: &PipelineRegistries,
+    options: &PhysicalPlanBuildOptions,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
     // Convert children first using the builder with caching
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
         let physical_child =
-            create_physical_plan_with_builder_cached(child.clone(), bindings, registries, builder)?;
+            create_physical_plan_with_builder_cached_with_options(
+                child.clone(),
+                bindings,
+                registries,
+                options,
+                builder,
+            )?;
         physical_children.push(physical_child);
     }
 
@@ -574,13 +701,20 @@ fn create_physical_data_sink_with_builder_cached(
     logical_plan: &Arc<LogicalPlan>,
     bindings: &SchemaBinding,
     registries: &PipelineRegistries,
+    options: &PhysicalPlanBuildOptions,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
     // Convert children first using the builder with caching
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
         let physical_child =
-            create_physical_plan_with_builder_cached(child.clone(), bindings, registries, builder)?;
+            create_physical_plan_with_builder_cached_with_options(
+                child.clone(),
+                bindings,
+                registries,
+                options,
+                builder,
+            )?;
         physical_children.push(physical_child);
     }
     if physical_children.len() != 1 {

@@ -8,6 +8,7 @@ pub mod physical_data_source;
 pub mod physical_decoder;
 pub mod physical_encoder;
 pub mod physical_filter;
+pub mod physical_process_time_watermark;
 pub mod physical_project;
 pub mod physical_result_collect;
 pub mod physical_shared_stream;
@@ -16,6 +17,7 @@ pub mod physical_streaming_aggregation;
 pub mod physical_streaming_encoder;
 pub mod physical_watermark;
 pub mod physical_window;
+pub mod physical_eventtime_watermark;
 
 pub use base_physical::BasePhysicalPlan;
 pub use physical_aggregation::{AggregateCall, PhysicalAggregation};
@@ -25,6 +27,7 @@ pub use physical_data_source::PhysicalDataSource;
 pub use physical_decoder::PhysicalDecoder;
 pub use physical_encoder::PhysicalEncoder;
 pub use physical_filter::PhysicalFilter;
+pub use physical_process_time_watermark::PhysicalProcessTimeWatermark;
 pub use physical_project::{PhysicalProject, PhysicalProjectField};
 pub use physical_result_collect::PhysicalResultCollect;
 pub use physical_shared_stream::PhysicalSharedStream;
@@ -35,6 +38,7 @@ pub use physical_watermark::{PhysicalWatermark, WatermarkConfig, WatermarkStrate
 pub use physical_window::{
     PhysicalCountWindow, PhysicalSlidingWindow, PhysicalStateWindow, PhysicalTumblingWindow,
 };
+pub use physical_eventtime_watermark::PhysicalEventtimeWatermark;
 
 /// Enum describing all supported physical execution nodes
 #[allow(clippy::large_enum_variant)]
@@ -57,6 +61,11 @@ pub enum PhysicalPlan {
     CountWindow(PhysicalCountWindow),
     SlidingWindow(PhysicalSlidingWindow),
     StateWindow(Box<PhysicalStateWindow>),
+    /// Processing-time watermark physical node (ticker-based).
+    ProcessTimeWatermark(PhysicalProcessTimeWatermark),
+    /// Event-time watermark physical node (data-driven).
+    EventtimeWatermark(PhysicalEventtimeWatermark),
+    /// Back-compat (deprecated).
     Watermark(PhysicalWatermark),
 }
 
@@ -81,6 +90,8 @@ impl PhysicalPlan {
             PhysicalPlan::CountWindow(plan) => plan.base.children(),
             PhysicalPlan::SlidingWindow(plan) => plan.base.children(),
             PhysicalPlan::StateWindow(plan) => plan.base.children(),
+            PhysicalPlan::ProcessTimeWatermark(plan) => plan.base.children(),
+            PhysicalPlan::EventtimeWatermark(plan) => plan.base.children(),
             PhysicalPlan::Watermark(plan) => plan.base.children(),
         }
     }
@@ -105,6 +116,8 @@ impl PhysicalPlan {
             PhysicalPlan::CountWindow(_) => "PhysicalCountWindow",
             PhysicalPlan::SlidingWindow(_) => "PhysicalSlidingWindow",
             PhysicalPlan::StateWindow(_) => "PhysicalStateWindow",
+            PhysicalPlan::ProcessTimeWatermark(_) => "PhysicalProcessTimeWatermark",
+            PhysicalPlan::EventtimeWatermark(_) => "PhysicalEventtimeWatermark",
             PhysicalPlan::Watermark(_) => "PhysicalWatermark",
         }
     }
@@ -129,6 +142,8 @@ impl PhysicalPlan {
             PhysicalPlan::CountWindow(plan) => plan.base.index(),
             PhysicalPlan::SlidingWindow(plan) => plan.base.index(),
             PhysicalPlan::StateWindow(plan) => plan.base.index(),
+            PhysicalPlan::ProcessTimeWatermark(plan) => plan.base.index(),
+            PhysicalPlan::EventtimeWatermark(plan) => plan.base.index(),
             PhysicalPlan::Watermark(plan) => plan.base.index(),
         }
     }
@@ -172,6 +187,8 @@ impl PhysicalPlan {
             PhysicalPlan::CountWindow(plan) => &mut plan.base.children,
             PhysicalPlan::SlidingWindow(plan) => &mut plan.base.children,
             PhysicalPlan::StateWindow(plan) => &mut plan.base.children,
+            PhysicalPlan::ProcessTimeWatermark(plan) => &mut plan.base.children,
+            PhysicalPlan::EventtimeWatermark(plan) => &mut plan.base.children,
             PhysicalPlan::Watermark(plan) => &mut plan.base.children,
         }
     }
@@ -183,10 +200,19 @@ pub fn rewrite_watermark_strategy(plan: &mut Arc<PhysicalPlan>, strategy: Waterm
         rewrite_watermark_strategy(child, strategy.clone());
     }
 
-    if let PhysicalPlan::Watermark(watermark) = plan_mut {
-        match &mut watermark.config {
+    match plan_mut {
+        PhysicalPlan::ProcessTimeWatermark(watermark) => match &mut watermark.config {
             WatermarkConfig::Tumbling { strategy: s, .. } => *s = strategy,
             WatermarkConfig::Sliding { strategy: s, .. } => *s = strategy,
-        }
+        },
+        PhysicalPlan::EventtimeWatermark(watermark) => match &mut watermark.config {
+            WatermarkConfig::Tumbling { strategy: s, .. } => *s = strategy,
+            WatermarkConfig::Sliding { strategy: s, .. } => *s = strategy,
+        },
+        PhysicalPlan::Watermark(watermark) => match &mut watermark.config {
+            WatermarkConfig::Tumbling { strategy: s, .. } => *s = strategy,
+            WatermarkConfig::Sliding { strategy: s, .. } => *s = strategy,
+        },
+        _ => {}
     }
 }

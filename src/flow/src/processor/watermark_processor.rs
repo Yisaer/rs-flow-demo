@@ -1,7 +1,7 @@
 //! WatermarkProcessor - emits or forwards watermarks to drive time-related operators.
 
 use crate::planner::physical::{
-    PhysicalPlan, PhysicalWatermark, WatermarkConfig, WatermarkStrategy,
+    PhysicalPlan, PhysicalProcessTimeWatermark, WatermarkConfig, WatermarkStrategy,
 };
 use crate::processor::base::{
     fan_in_control_streams, fan_in_streams, forward_error, send_control_with_backpressure,
@@ -27,7 +27,7 @@ pub enum WatermarkProcessor {
 impl WatermarkProcessor {
     pub fn from_physical_plan(id: impl Into<String>, plan: Arc<PhysicalPlan>) -> Option<Self> {
         match plan.as_ref() {
-            PhysicalPlan::Watermark(watermark) => match &watermark.config {
+            PhysicalPlan::ProcessTimeWatermark(watermark) => match &watermark.config {
                 WatermarkConfig::Tumbling { .. } => Some(WatermarkProcessor::Tumbling(
                     TumblingWatermarkProcessor::new(id, Arc::new(watermark.clone())),
                 )),
@@ -87,7 +87,7 @@ impl Processor for WatermarkProcessor {
 /// Watermark operator processor.
 pub struct TumblingWatermarkProcessor {
     id: String,
-    physical: Arc<PhysicalWatermark>,
+    physical: Arc<PhysicalProcessTimeWatermark>,
     inputs: Vec<broadcast::Receiver<StreamData>>,
     control_inputs: Vec<broadcast::Receiver<ControlSignal>>,
     output: broadcast::Sender<StreamData>,
@@ -95,7 +95,7 @@ pub struct TumblingWatermarkProcessor {
 }
 
 impl TumblingWatermarkProcessor {
-    pub fn new(id: impl Into<String>, physical: Arc<PhysicalWatermark>) -> Self {
+    pub fn new(id: impl Into<String>, physical: Arc<PhysicalProcessTimeWatermark>) -> Self {
         let (output, _) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
         let (control_output, _) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
         Self {
@@ -249,7 +249,7 @@ pub struct SlidingWatermarkProcessor {
 }
 
 impl SlidingWatermarkProcessor {
-    pub fn new(id: impl Into<String>, physical: Arc<PhysicalWatermark>) -> Self {
+    pub fn new(id: impl Into<String>, physical: Arc<PhysicalProcessTimeWatermark>) -> Self {
         let (output, _) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
         let (control_output, _) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
         let lookahead_secs = match &physical.config {
@@ -444,7 +444,7 @@ impl Processor for SlidingWatermarkProcessor {
 mod tests {
     use super::*;
     use crate::planner::logical::TimeUnit;
-    use crate::planner::physical::{BasePhysicalPlan, WatermarkConfig};
+    use crate::planner::physical::WatermarkConfig;
     use tokio::time::timeout;
 
     fn tuple_at(sec: u64) -> crate::model::Tuple {
@@ -453,9 +453,8 @@ mod tests {
 
     #[tokio::test]
     async fn sliding_watermark_emits_deadline_per_tuple_in_processing_time() {
-        let physical = PhysicalWatermark {
-            base: BasePhysicalPlan::new(Vec::new(), 0),
-            config: WatermarkConfig::Sliding {
+        let physical = PhysicalProcessTimeWatermark::new(
+            WatermarkConfig::Sliding {
                 time_unit: TimeUnit::Seconds,
                 lookback: 10,
                 lookahead: Some(15),
@@ -464,7 +463,9 @@ mod tests {
                     interval: 1,
                 },
             },
-        };
+            Vec::new(),
+            0,
+        );
         let mut processor = SlidingWatermarkProcessor::new("wm", Arc::new(physical));
         let (input, _) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
         processor.add_input(input.subscribe());
