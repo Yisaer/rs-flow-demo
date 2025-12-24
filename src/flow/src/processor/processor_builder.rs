@@ -683,28 +683,25 @@ fn create_processor_from_plan_node(
                 )
                 .map_err(|err| ProcessorError::InvalidConfiguration(err.to_string()))?;
             let mut processor = DecoderProcessor::new(plan_name.clone(), decoder);
-            if let Some(eventtime) = context.eventtime() {
-                if eventtime.enabled {
-                    if let Some(def) = eventtime.per_source.get(decoder_plan.source_name()) {
-                        let parser =
-                            eventtime
-                                .registry
-                                .resolve(def.eventtime_type())
-                                .map_err(|err| {
-                                    ProcessorError::InvalidConfiguration(format!(
-                                        "eventtime.type `{}` not registered: {}",
-                                        def.eventtime_type(),
-                                        err
-                                    ))
-                                })?;
-                        processor = processor.with_eventtime(EventtimeDecodeConfig {
-                            source_name: decoder_plan.source_name().to_string(),
-                            column: def.column().to_string(),
-                            type_key: def.eventtime_type().to_string(),
-                            parser,
-                        });
-                    }
-                }
+            if let (Some(eventtime_ctx), Some(eventtime_spec)) =
+                (context.eventtime(), decoder_plan.eventtime())
+            {
+                let parser = eventtime_ctx
+                    .registry
+                    .resolve(eventtime_spec.type_key.as_str())
+                    .map_err(|err| {
+                        ProcessorError::InvalidConfiguration(format!(
+                            "eventtime.type `{}` not registered: {}",
+                            eventtime_spec.type_key, err
+                        ))
+                    })?;
+                processor = processor.with_eventtime(EventtimeDecodeConfig {
+                    source_name: decoder_plan.source_name().to_string(),
+                    column_name: eventtime_spec.column_name.clone(),
+                    column_index: eventtime_spec.column_index,
+                    type_key: eventtime_spec.type_key.clone(),
+                    parser,
+                });
             }
             Ok(ProcessorBuildOutput::with_processor(
                 PlanProcessor::Decoder(processor),
@@ -1207,6 +1204,7 @@ mod tests {
             "test_source".to_string(),
             StreamDecoderConfig::json(),
             Arc::clone(&schema),
+            None,
             vec![data_source],
             1,
         )));

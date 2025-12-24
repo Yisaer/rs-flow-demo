@@ -370,8 +370,13 @@ pub fn explain_pipeline_with_options(
     let (schema_binding, stream_defs) =
         build_schema_binding(&select_stmt, catalog, shared_stream_registry)?;
     let logical_plan = create_logical_plan(select_stmt, sinks, &stream_defs)?;
-    let (logical_plan, pruned_binding) =
-        optimize_logical_plan(Arc::clone(&logical_plan), &schema_binding);
+    let (logical_plan, pruned_binding) = crate::planner::optimize_logical_plan_with_options(
+        Arc::clone(&logical_plan),
+        &schema_binding,
+        &crate::planner::LogicalOptimizerOptions {
+            eventtime_enabled: options.eventtime.enabled,
+        },
+    );
     if options.eventtime.enabled {
         validate_eventtime_enabled(&stream_defs, registries)?;
     }
@@ -471,8 +476,13 @@ pub fn create_pipeline_with_attached_sources_with_options(
     let (schema_binding, stream_defs) =
         build_schema_binding(&select_stmt, catalog, shared_stream_registry)?;
     let logical_plan = create_logical_plan(select_stmt, sinks, &stream_defs)?;
-    let (logical_plan, pruned_binding) =
-        optimize_logical_plan(Arc::clone(&logical_plan), &schema_binding);
+    let (logical_plan, pruned_binding) = crate::planner::optimize_logical_plan_with_options(
+        Arc::clone(&logical_plan),
+        &schema_binding,
+        &crate::planner::LogicalOptimizerOptions {
+            eventtime_enabled: options.eventtime.enabled,
+        },
+    );
     if options.eventtime.enabled {
         validate_eventtime_enabled(&stream_defs, registries)?;
     }

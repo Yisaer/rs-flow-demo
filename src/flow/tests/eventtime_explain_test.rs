@@ -92,4 +92,7 @@ fn explain_pipeline_with_eventtime_enabled_prints_plans() {
     assert!(rendered.contains("PhysicalEventtimeWatermark"));
     assert!(rendered.contains("mode=event_time"));
     assert!(rendered.contains("lateToleranceMs=5000"));
+    assert!(rendered.contains("eventtime.column=event_ts"));
+    assert!(rendered.contains("eventtime.type=unixtimestamp_ms"));
+    assert!(rendered.contains("eventtime.index=1"));
 }

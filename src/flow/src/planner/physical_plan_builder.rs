@@ -11,8 +11,9 @@ use crate::planner::logical::{
 use crate::planner::physical::physical_project::PhysicalProjectField;
 use crate::planner::physical::{
     PhysicalAggregation, PhysicalBatch, PhysicalDataSink, PhysicalDataSource, PhysicalDecoder,
-    PhysicalEncoder, PhysicalFilter, PhysicalPlan, PhysicalProject, PhysicalResultCollect,
-    PhysicalEventtimeWatermark, PhysicalProcessTimeWatermark, PhysicalSharedStream,
+    PhysicalDecoderEventtimeSpec, PhysicalEncoder, PhysicalFilter, PhysicalPlan, PhysicalProject,
+    PhysicalResultCollect, PhysicalEventtimeWatermark, PhysicalProcessTimeWatermark,
+    PhysicalSharedStream,
     PhysicalSinkConnector, PhysicalStatefulFunction, StatefulCall, WatermarkConfig,
     WatermarkStrategy,
 };
@@ -160,6 +161,7 @@ fn create_physical_plan_with_builder_cached_with_options(
                 &logical_plan,
                 index,
                 bindings,
+                options,
                 builder,
             )?
         }
@@ -555,10 +557,32 @@ fn create_physical_data_source_with_builder(
     _logical_plan: &Arc<LogicalPlan>,
     index: i64,
     bindings: &SchemaBinding,
+    options: &PhysicalPlanBuildOptions,
     builder: &mut PhysicalPlanBuilder,
 ) -> Result<Arc<PhysicalPlan>, String> {
     let entry = find_binding_entry(logical_ds, bindings)?;
     let schema = entry.schema.clone();
+    let eventtime = if options.eventtime_enabled {
+        logical_ds.eventtime().map(|cfg| -> Result<PhysicalDecoderEventtimeSpec, String> {
+            let column_name = cfg.column().to_string();
+            let type_key = cfg.eventtime_type().to_string();
+            let column_index = schema
+                .column_index(column_name.as_str())
+                .ok_or_else(|| {
+                    format!(
+                        "eventtime.column `{}` not found in pruned schema for `{}`",
+                        column_name, logical_ds.source_name
+                    )
+                })?;
+            Ok(PhysicalDecoderEventtimeSpec {
+                column_name,
+                type_key,
+                column_index,
+            })
+        }).transpose()?
+    } else {
+        None
+    };
     match entry.kind {
         SourceBindingKind::Regular => {
             let physical_ds = PhysicalDataSource::new(
@@ -573,6 +597,7 @@ fn create_physical_data_source_with_builder(
                 logical_ds.source_name.clone(),
                 logical_ds.decoder().clone(),
                 schema,
+                eventtime,
                 vec![datasource_plan],
                 decoder_index,
             );
@@ -591,6 +616,7 @@ fn create_physical_data_source_with_builder(
                     logical_ds.source_name.clone(),
                     logical_ds.decoder().clone(),
                     Arc::clone(&schema),
+                    eventtime.clone(),
                     vec![ds_plan],
                     1,
                 );

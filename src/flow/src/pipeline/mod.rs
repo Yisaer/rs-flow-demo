@@ -13,8 +13,8 @@ use crate::processor::EventtimePipelineContext;
 use crate::processor::Processor;
 use crate::shared_stream::SharedStreamRegistry;
 use crate::{
-    explain_pipeline_with_options, optimize_logical_plan, optimize_physical_plan, PipelineExplain,
-    PipelineRegistries, PipelineSink, PipelineSinkConnector, SinkConnectorConfig,
+    explain_pipeline_with_options, optimize_physical_plan, PipelineExplain, PipelineRegistries,
+    PipelineSink, PipelineSinkConnector, SinkConnectorConfig,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -552,7 +552,13 @@ fn build_pipeline_runtime_with_logical_ir(
     let schema_binding = SchemaBinding::new(binding_entries);
     let sinks = build_sinks_from_definition(definition)?;
     let logical_plan = create_logical_plan(select_stmt, sinks, &stream_definitions)?;
-    let (logical_plan, pruned_binding) = optimize_logical_plan(logical_plan, &schema_binding);
+    let (logical_plan, pruned_binding) = crate::planner::optimize_logical_plan_with_options(
+        logical_plan,
+        &schema_binding,
+        &crate::planner::LogicalOptimizerOptions {
+            eventtime_enabled: definition.options().eventtime.enabled,
+        },
+    );
     let logical_ir = LogicalPlanIR::from_plan(&logical_plan)
         .encode()
         .map_err(|err| err.to_string())?;
@@ -660,7 +666,13 @@ fn build_pipeline_runtime_from_logical_ir(
     let schema_binding = SchemaBinding::new(binding_entries);
     let logical_plan =
         logical_plan_from_ir(&logical_ir, &datasource_inputs).map_err(|e| e.to_string())?;
-    let (logical_plan, pruned_binding) = optimize_logical_plan(logical_plan, &schema_binding);
+    let (logical_plan, pruned_binding) = crate::planner::optimize_logical_plan_with_options(
+        logical_plan,
+        &schema_binding,
+        &crate::planner::LogicalOptimizerOptions {
+            eventtime_enabled: definition.options().eventtime.enabled,
+        },
+    );
 
     let build_options = crate::planner::PhysicalPlanBuildOptions {
         eventtime_enabled: definition.options().eventtime.enabled,

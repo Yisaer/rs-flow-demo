@@ -16,7 +16,8 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 #[derive(Clone)]
 pub struct EventtimeDecodeConfig {
     pub source_name: String,
-    pub column: String,
+    pub column_name: String,
+    pub column_index: usize,
     pub type_key: String,
     pub parser: Arc<dyn EventtimeTypeParser>,
 }
@@ -203,7 +204,7 @@ fn apply_eventtime(
         Err(err) => {
             errors.push(format!(
                 "eventtime parse error: source={}, column={}, type={}, {}",
-                cfg.source_name, cfg.column, cfg.type_key, err
+                cfg.source_name, cfg.column_name, cfg.type_key, err
             ));
             false
         }
@@ -235,11 +236,11 @@ fn extract_timestamp(
     cfg: &EventtimeDecodeConfig,
 ) -> Result<SystemTime, EventtimeParseError> {
     let value = tuple
-        .value_by_name(cfg.source_name.as_str(), cfg.column.as_str())
+        .value_by_index(cfg.source_name.as_str(), cfg.column_index)
         .ok_or_else(|| {
             EventtimeParseError::new(format!(
-                "eventtime column `{}` missing in tuple",
-                cfg.column
+                "eventtime column `{}` (index={}) missing in tuple",
+                cfg.column_name, cfg.column_index
             ))
         })?;
     cfg.parser.parse(value)

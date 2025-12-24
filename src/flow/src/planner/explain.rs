@@ -354,6 +354,11 @@ fn build_physical_node_with_prefix(
                 .map(|c| c.name.clone())
                 .collect();
             info.push(format!("schema=[{}]", cols.join(", ")));
+            if let Some(eventtime) = decoder.eventtime() {
+                info.push(format!("eventtime.column={}", eventtime.column_name));
+                info.push(format!("eventtime.type={}", eventtime.type_key));
+                info.push(format!("eventtime.index={}", eventtime.column_index));
+            }
         }
         PhysicalPlan::SharedStream(ds) => {
             info.push(format!("source={}", ds.stream_name()));
