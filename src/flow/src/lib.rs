@@ -64,7 +64,7 @@ pub use stateful::StatefulFunctionRegistry;
 
 use connector::{ConnectorRegistry, MqttClientManager};
 use planner::logical::create_logical_plan;
-use processor::{create_processor_pipeline, ProcessorPipeline};
+use processor::{create_processor_pipeline, ProcessorPipeline, ProcessorPipelineDependencies};
 use shared_stream::SharedStreamRegistry;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -291,13 +291,15 @@ pub fn create_pipeline(
         build_physical_plan_from_sql(sql, sinks, catalog, shared_stream_registry, registries)?;
     let pipeline = create_processor_pipeline(
         physical_plan,
-        mqtt_client_manager,
-        registries.connector_registry(),
-        registries.encoder_registry(),
-        registries.decoder_registry(),
-        registries.aggregate_registry(),
-        registries.stateful_registry(),
-        None,
+        ProcessorPipelineDependencies::new(
+            mqtt_client_manager,
+            registries.connector_registry(),
+            registries.encoder_registry(),
+            registries.decoder_registry(),
+            registries.aggregate_registry(),
+            registries.stateful_registry(),
+            None,
+        ),
     )?;
     Ok(pipeline)
 }
@@ -521,13 +523,15 @@ pub fn create_pipeline_with_attached_sources_with_options(
 
     let mut pipeline = create_processor_pipeline(
         optimized_plan,
-        mqtt_client_manager.clone(),
-        registries.connector_registry(),
-        registries.encoder_registry(),
-        registries.decoder_registry(),
-        registries.aggregate_registry(),
-        registries.stateful_registry(),
-        eventtime,
+        ProcessorPipelineDependencies::new(
+            mqtt_client_manager.clone(),
+            registries.connector_registry(),
+            registries.encoder_registry(),
+            registries.decoder_registry(),
+            registries.aggregate_registry(),
+            registries.stateful_registry(),
+            eventtime,
+        ),
     )?;
     pipeline::attach_sources_for_pipeline(&mut pipeline, catalog, &mqtt_client_manager)?;
     Ok(pipeline)

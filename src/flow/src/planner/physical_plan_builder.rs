@@ -11,11 +11,10 @@ use crate::planner::logical::{
 use crate::planner::physical::physical_project::PhysicalProjectField;
 use crate::planner::physical::{
     PhysicalAggregation, PhysicalBatch, PhysicalDataSink, PhysicalDataSource, PhysicalDecoder,
-    PhysicalDecoderEventtimeSpec, PhysicalEncoder, PhysicalFilter, PhysicalPlan, PhysicalProject,
-    PhysicalResultCollect, PhysicalEventtimeWatermark, PhysicalProcessTimeWatermark,
-    PhysicalSharedStream,
-    PhysicalSinkConnector, PhysicalStatefulFunction, StatefulCall, WatermarkConfig,
-    WatermarkStrategy,
+    PhysicalDecoderEventtimeSpec, PhysicalEncoder, PhysicalEventtimeWatermark, PhysicalFilter,
+    PhysicalPlan, PhysicalProcessTimeWatermark, PhysicalProject, PhysicalResultCollect,
+    PhysicalSharedStream, PhysicalSinkConnector, PhysicalStatefulFunction, StatefulCall,
+    WatermarkConfig, WatermarkStrategy,
 };
 use crate::planner::sink::{PipelineSink, PipelineSinkConnector};
 use crate::PipelineRegistries;
@@ -243,14 +242,13 @@ fn create_physical_stateful_function_with_builder(
 ) -> Result<Arc<PhysicalPlan>, String> {
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
-        let physical_child =
-            create_physical_plan_with_builder_cached_with_options(
-                child.clone(),
-                bindings,
-                registries,
-                options,
-                builder,
-            )?;
+        let physical_child = create_physical_plan_with_builder_cached_with_options(
+            child.clone(),
+            bindings,
+            registries,
+            options,
+            builder,
+        )?;
         physical_children.push(physical_child);
     }
 
@@ -325,14 +323,13 @@ fn create_physical_result_collect_from_tail_with_builder_cached(
     // Convert children first using the builder with caching
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
-        let physical_child =
-            create_physical_plan_with_builder_cached_with_options(
-                child.clone(),
-                bindings,
-                registries,
-                options,
-                builder,
-            )?;
+        let physical_child = create_physical_plan_with_builder_cached_with_options(
+            child.clone(),
+            bindings,
+            registries,
+            options,
+            builder,
+        )?;
         physical_children.push(physical_child);
     }
 
@@ -357,14 +354,13 @@ fn create_physical_window_with_builder(
 ) -> Result<Arc<PhysicalPlan>, String> {
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
-        let physical_child =
-            create_physical_plan_with_builder_cached_with_options(
-                child.clone(),
-                bindings,
-                registries,
-                options,
-                builder,
-            )?;
+        let physical_child = create_physical_plan_with_builder_cached_with_options(
+            child.clone(),
+            bindings,
+            registries,
+            options,
+            builder,
+        )?;
         physical_children.push(physical_child);
     }
 
@@ -453,10 +449,7 @@ fn create_physical_window_with_builder(
                         watermark_index,
                     ))
                 };
-                (
-                    vec![Arc::new(watermark_plan)],
-                    builder.allocate_index(),
-                )
+                (vec![Arc::new(watermark_plan)], builder.allocate_index())
             } else {
                 (physical_children, builder.allocate_index())
             };
@@ -528,14 +521,13 @@ fn create_physical_aggregation_with_builder(
 ) -> Result<Arc<PhysicalPlan>, String> {
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
-        let physical_child =
-            create_physical_plan_with_builder_cached_with_options(
-                child.clone(),
-                bindings,
-                registries,
-                options,
-                builder,
-            )?;
+        let physical_child = create_physical_plan_with_builder_cached_with_options(
+            child.clone(),
+            bindings,
+            registries,
+            options,
+            builder,
+        )?;
         physical_children.push(physical_child);
     }
     let index = builder.allocate_index();
@@ -563,23 +555,24 @@ fn create_physical_data_source_with_builder(
     let entry = find_binding_entry(logical_ds, bindings)?;
     let schema = entry.schema.clone();
     let eventtime = if options.eventtime_enabled {
-        logical_ds.eventtime().map(|cfg| -> Result<PhysicalDecoderEventtimeSpec, String> {
-            let column_name = cfg.column().to_string();
-            let type_key = cfg.eventtime_type().to_string();
-            let column_index = schema
-                .column_index(column_name.as_str())
-                .ok_or_else(|| {
+        logical_ds
+            .eventtime()
+            .map(|cfg| -> Result<PhysicalDecoderEventtimeSpec, String> {
+                let column_name = cfg.column().to_string();
+                let type_key = cfg.eventtime_type().to_string();
+                let column_index = schema.column_index(column_name.as_str()).ok_or_else(|| {
                     format!(
                         "eventtime.column `{}` not found in pruned schema for `{}`",
                         column_name, logical_ds.source_name
                     )
                 })?;
-            Ok(PhysicalDecoderEventtimeSpec {
-                column_name,
-                type_key,
-                column_index,
+                Ok(PhysicalDecoderEventtimeSpec {
+                    column_name,
+                    type_key,
+                    column_index,
+                })
             })
-        }).transpose()?
+            .transpose()?
     } else {
         None
     };
@@ -647,14 +640,13 @@ fn create_physical_filter_with_builder_cached(
     // Convert children first using the builder with caching
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
-        let physical_child =
-            create_physical_plan_with_builder_cached_with_options(
-                child.clone(),
-                bindings,
-                registries,
-                options,
-                builder,
-            )?;
+        let physical_child = create_physical_plan_with_builder_cached_with_options(
+            child.clone(),
+            bindings,
+            registries,
+            options,
+            builder,
+        )?;
         physical_children.push(physical_child);
     }
 
@@ -693,14 +685,13 @@ fn create_physical_project_with_builder_cached(
     // Convert children first using the builder with caching
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
-        let physical_child =
-            create_physical_plan_with_builder_cached_with_options(
-                child.clone(),
-                bindings,
-                registries,
-                options,
-                builder,
-            )?;
+        let physical_child = create_physical_plan_with_builder_cached_with_options(
+            child.clone(),
+            bindings,
+            registries,
+            options,
+            builder,
+        )?;
         physical_children.push(physical_child);
     }
 
@@ -733,14 +724,13 @@ fn create_physical_data_sink_with_builder_cached(
     // Convert children first using the builder with caching
     let mut physical_children = Vec::new();
     for child in logical_plan.children() {
-        let physical_child =
-            create_physical_plan_with_builder_cached_with_options(
-                child.clone(),
-                bindings,
-                registries,
-                options,
-                builder,
-            )?;
+        let physical_child = create_physical_plan_with_builder_cached_with_options(
+            child.clone(),
+            bindings,
+            registries,
+            options,
+            builder,
+        )?;
         physical_children.push(physical_child);
     }
     if physical_children.len() != 1 {

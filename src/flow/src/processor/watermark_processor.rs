@@ -952,12 +952,7 @@ mod tests {
                 StreamData::Collection(collection) => {
                     let rows = collection.into_rows().expect("rows");
                     for t in rows {
-                        saw_rows.push(
-                            t.timestamp
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs(),
-                        );
+                        saw_rows.push(t.timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs());
                     }
                 }
                 StreamData::Watermark(ts) => {
@@ -986,12 +981,7 @@ mod tests {
                 StreamData::Collection(collection) => {
                     let rows = collection.into_rows().expect("rows");
                     for t in rows {
-                        saw_rows.push(
-                            t.timestamp
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs(),
-                        );
+                        saw_rows.push(t.timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs());
                     }
                 }
                 StreamData::Watermark(ts) => {
@@ -1022,7 +1012,10 @@ mod tests {
         let step = state
             .on_rows(vec![tuple_at(3), tuple_at(1), tuple_at(2)])
             .expect("on_rows");
-        assert_eq!(state.current_watermark_nanos, Duration::from_secs(2).as_nanos());
+        assert_eq!(
+            state.current_watermark_nanos,
+            Duration::from_secs(2).as_nanos()
+        );
         assert!(step.errors.is_empty());
         assert_eq!(step.outputs.len(), 2);
         match &step.outputs[0] {
@@ -1044,7 +1037,10 @@ mod tests {
         }
 
         let step = state.on_rows(vec![tuple_at(4)]).expect("on_rows");
-        assert_eq!(state.current_watermark_nanos, Duration::from_secs(3).as_nanos());
+        assert_eq!(
+            state.current_watermark_nanos,
+            Duration::from_secs(3).as_nanos()
+        );
         assert!(step.errors.is_empty());
         assert_eq!(step.outputs.len(), 2);
         match &step.outputs[0] {
@@ -1077,9 +1073,14 @@ mod tests {
         let mut state = EventtimeWatermarkState::new(Duration::from_secs(0));
         let step = state.on_rows(vec![tuple_at(2)]).expect("on_rows");
         assert_eq!(step.outputs.len(), 2);
-        assert_eq!(state.current_watermark_nanos, Duration::from_secs(2).as_nanos());
+        assert_eq!(
+            state.current_watermark_nanos,
+            Duration::from_secs(2).as_nanos()
+        );
 
-        let step = state.on_rows(vec![tuple_at(2), tuple_at(1)]).expect("on_rows");
+        let step = state
+            .on_rows(vec![tuple_at(2), tuple_at(1)])
+            .expect("on_rows");
         assert!(step.outputs.is_empty());
     }
 }

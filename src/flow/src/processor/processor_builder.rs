@@ -68,6 +68,39 @@ pub enum PlanProcessor {
 }
 
 #[derive(Clone)]
+pub struct ProcessorPipelineDependencies {
+    mqtt_clients: MqttClientManager,
+    connector_registry: Arc<ConnectorRegistry>,
+    encoder_registry: Arc<EncoderRegistry>,
+    decoder_registry: Arc<DecoderRegistry>,
+    aggregate_registry: Arc<AggregateFunctionRegistry>,
+    stateful_registry: Arc<StatefulFunctionRegistry>,
+    eventtime: Option<EventtimePipelineContext>,
+}
+
+impl ProcessorPipelineDependencies {
+    pub fn new(
+        mqtt_clients: MqttClientManager,
+        connector_registry: Arc<ConnectorRegistry>,
+        encoder_registry: Arc<EncoderRegistry>,
+        decoder_registry: Arc<DecoderRegistry>,
+        aggregate_registry: Arc<AggregateFunctionRegistry>,
+        stateful_registry: Arc<StatefulFunctionRegistry>,
+        eventtime: Option<EventtimePipelineContext>,
+    ) -> Self {
+        Self {
+            mqtt_clients,
+            connector_registry,
+            encoder_registry,
+            decoder_registry,
+            aggregate_registry,
+            stateful_registry,
+            eventtime,
+        }
+    }
+}
+
+#[derive(Clone)]
 struct ProcessorBuilderContext {
     mqtt_clients: MqttClientManager,
     connector_registry: Arc<ConnectorRegistry>,
@@ -80,28 +113,6 @@ struct ProcessorBuilderContext {
 }
 
 impl ProcessorBuilderContext {
-    fn new(
-        mqtt_clients: MqttClientManager,
-        connector_registry: Arc<ConnectorRegistry>,
-        encoder_registry: Arc<EncoderRegistry>,
-        decoder_registry: Arc<DecoderRegistry>,
-        aggregate_registry: Arc<AggregateFunctionRegistry>,
-        stateful_registry: Arc<StatefulFunctionRegistry>,
-        shared_source_required_columns: HashMap<String, Vec<String>>,
-        eventtime: Option<EventtimePipelineContext>,
-    ) -> Self {
-        Self {
-            mqtt_clients,
-            connector_registry,
-            encoder_registry,
-            decoder_registry,
-            aggregate_registry,
-            stateful_registry,
-            shared_source_required_columns,
-            eventtime,
-        }
-    }
-
     fn mqtt_clients_ref(&self) -> &MqttClientManager {
         &self.mqtt_clients
     }
@@ -1102,13 +1113,7 @@ fn connect_processors(
 /// carries the declarative sink configuration.
 pub fn create_processor_pipeline(
     physical_plan: Arc<PhysicalPlan>,
-    mqtt_clients: MqttClientManager,
-    connector_registry: Arc<ConnectorRegistry>,
-    encoder_registry: Arc<EncoderRegistry>,
-    decoder_registry: Arc<DecoderRegistry>,
-    aggregate_registry: Arc<AggregateFunctionRegistry>,
-    stateful_registry: Arc<StatefulFunctionRegistry>,
-    eventtime: Option<EventtimePipelineContext>,
+    dependencies: ProcessorPipelineDependencies,
 ) -> Result<ProcessorPipeline, ProcessorError> {
     let mut control_source = ControlSourceProcessor::new("control_source");
     let (pipeline_input_sender, pipeline_input_receiver) = mpsc::channel(100);
@@ -1121,16 +1126,16 @@ pub fn create_processor_pipeline(
 
     let mut processor_map = ProcessorMap::new();
     let shared_required_columns = compute_shared_required_columns(physical_plan.as_ref());
-    let context = ProcessorBuilderContext::new(
-        mqtt_clients,
-        connector_registry,
-        encoder_registry,
-        decoder_registry,
-        aggregate_registry,
-        stateful_registry,
-        shared_required_columns,
-        eventtime,
-    );
+    let context = ProcessorBuilderContext {
+        mqtt_clients: dependencies.mqtt_clients,
+        connector_registry: dependencies.connector_registry,
+        encoder_registry: dependencies.encoder_registry,
+        decoder_registry: dependencies.decoder_registry,
+        aggregate_registry: dependencies.aggregate_registry,
+        stateful_registry: dependencies.stateful_registry,
+        shared_source_required_columns: shared_required_columns,
+        eventtime: dependencies.eventtime,
+    };
     build_processors_recursive(Arc::clone(&physical_plan), &mut processor_map, &context)?;
 
     connect_processors(
@@ -1232,16 +1237,16 @@ mod tests {
         let decoder_registry = DecoderRegistry::with_builtin_decoders();
         let aggregate_registry = AggregateFunctionRegistry::with_builtins();
         let stateful_registry = StatefulFunctionRegistry::with_builtins();
-        let context = ProcessorBuilderContext::new(
-            MqttClientManager::new(),
+        let context = ProcessorBuilderContext {
+            mqtt_clients: MqttClientManager::new(),
             connector_registry,
             encoder_registry,
             decoder_registry,
             aggregate_registry,
             stateful_registry,
-            HashMap::new(),
-            None,
-        );
+            shared_source_required_columns: HashMap::new(),
+            eventtime: None,
+        };
         let result = create_processor_from_plan_node(&physical_project, &context)
             .expect("processor creation failed");
 

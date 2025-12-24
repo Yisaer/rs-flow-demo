@@ -7,10 +7,10 @@ use crate::expr::sql_conversion::{SchemaBinding, SchemaBindingEntry, SourceBindi
 use crate::planner::logical::create_logical_plan;
 use crate::planner::plan_cache::{logical_plan_from_ir, sources_from_logical_ir, LogicalPlanIR};
 use crate::planner::sink::{CommonSinkProps, SinkEncoderConfig};
-use crate::processor::create_processor_pipeline;
 use crate::processor::processor_builder::{PlanProcessor, ProcessorPipeline};
 use crate::processor::EventtimePipelineContext;
 use crate::processor::Processor;
+use crate::processor::{create_processor_pipeline, ProcessorPipelineDependencies};
 use crate::shared_stream::SharedStreamRegistry;
 use crate::{
     explain_pipeline_with_options, optimize_physical_plan, PipelineExplain, PipelineRegistries,
@@ -610,13 +610,15 @@ fn build_pipeline_runtime_with_logical_ir(
 
     let mut pipeline = create_processor_pipeline(
         optimized_plan,
-        mqtt_client_manager.clone(),
-        registries.connector_registry(),
-        registries.encoder_registry(),
-        registries.decoder_registry(),
-        registries.aggregate_registry(),
-        registries.stateful_registry(),
-        eventtime,
+        ProcessorPipelineDependencies::new(
+            mqtt_client_manager.clone(),
+            registries.connector_registry(),
+            registries.encoder_registry(),
+            registries.decoder_registry(),
+            registries.aggregate_registry(),
+            registries.stateful_registry(),
+            eventtime,
+        ),
     )
     .map_err(|err| err.to_string())?;
     pipeline.set_pipeline_id(definition.id().to_string());
@@ -714,13 +716,15 @@ fn build_pipeline_runtime_from_logical_ir(
 
     let mut pipeline = create_processor_pipeline(
         optimized_plan,
-        mqtt_client_manager.clone(),
-        registries.connector_registry(),
-        registries.encoder_registry(),
-        registries.decoder_registry(),
-        registries.aggregate_registry(),
-        registries.stateful_registry(),
-        eventtime,
+        ProcessorPipelineDependencies::new(
+            mqtt_client_manager.clone(),
+            registries.connector_registry(),
+            registries.encoder_registry(),
+            registries.decoder_registry(),
+            registries.aggregate_registry(),
+            registries.stateful_registry(),
+            eventtime,
+        ),
     )
     .map_err(|err| err.to_string())?;
 

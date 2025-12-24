@@ -152,8 +152,7 @@ fn parse_integer(value: &Value) -> Result<i128, EventtimeParseError> {
         Value::Uint8(v) => Ok(i128::from(*v)),
         Value::Uint16(v) => Ok(i128::from(*v)),
         Value::Uint32(v) => Ok(i128::from(*v)),
-        Value::Uint64(v) => i128::try_from(*v)
-            .map_err(|_| EventtimeParseError::new(format!("eventtime integer overflow: {v}"))),
+        Value::Uint64(v) => Ok(i128::from(*v)),
         Value::String(v) => v.parse::<i128>().map_err(|err| {
             EventtimeParseError::new(format!("eventtime string `{v}` is not an integer: {err}"))
         }),
