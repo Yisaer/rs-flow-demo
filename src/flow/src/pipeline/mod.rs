@@ -18,6 +18,7 @@ use crate::{
 };
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 const DEFAULT_SINK_TOPIC: &str = "/yisa/data2";
 
@@ -171,6 +172,22 @@ impl PipelineDefinition {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PipelineOptions {
     pub plan_cache: PlanCacheOptions,
+    pub eventtime: EventtimeOptions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventtimeOptions {
+    pub enabled: bool,
+    pub late_tolerance: Duration,
+}
+
+impl Default for EventtimeOptions {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            late_tolerance: Duration::ZERO,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

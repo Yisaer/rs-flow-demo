@@ -13,8 +13,8 @@ pub mod stateful;
 
 pub use aggregation::AggregateFunctionRegistry;
 pub use catalog::{
-    Catalog, CatalogError, MqttStreamProps, StreamDecoderConfig, StreamDefinition, StreamProps,
-    StreamType,
+    Catalog, CatalogError, EventtimeDefinition, MqttStreamProps, StreamDecoderConfig,
+    StreamDefinition, StreamProps, StreamType,
 };
 pub use codec::{
     CodecError, CollectionEncoder, CollectionEncoderStream, DecoderRegistry, EncodeError,
