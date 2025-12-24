@@ -62,6 +62,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         synapse_flow::config::AppConfig::default()
     };
 
+    let _logging_guard = synapse_flow::logging::init_logging(&config.logging)?;
+
     let mut options = config.to_server_options();
     if let Some(dir) = cli_flags.data_dir() {
         options.data_dir = Some(dir.to_string());
