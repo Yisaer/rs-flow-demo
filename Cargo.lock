@@ -356,6 +356,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
+ "tracing",
  "url",
  "uuid",
 ]
@@ -806,6 +807,7 @@ dependencies = [
  "storage",
  "tempfile",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

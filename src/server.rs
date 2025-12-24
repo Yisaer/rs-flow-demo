@@ -118,9 +118,9 @@ pub async fn init(
         .unwrap_or_else(|| DEFAULT_DATA_DIR.to_string());
 
     let storage = StorageManager::new(&data_dir)?;
-    println!(
-        "[synapse-flow] storage dir: {}",
-        storage.base_dir().display()
+    tracing::info!(
+        storage_dir = %storage.base_dir().display(),
+        "storage initialized"
     );
 
     storage_bridge::load_from_storage(&storage, &instance)
@@ -138,18 +138,18 @@ pub async fn init(
 /// Start the manager server and await termination (Ctrl+C or server error).
 pub async fn start(ctx: ServerContext) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (instance, storage, manager_addr, _profiling_enabled) = ctx.into_parts();
-    println!("Starting manager on {}", manager_addr);
+    tracing::info!(manager_addr = %manager_addr, "starting manager");
     let manager_future = manager::start_server(manager_addr.clone(), instance, storage);
 
     tokio::select! {
         result = manager_future => {
             if let Err(err) = result {
-                eprintln!("Manager server exited with error: {}", err);
+                tracing::error!(error = %err, "manager server exited with error");
                 return Err(err);
             }
         }
         _ = tokio::signal::ctrl_c() => {
-            println!("Ctrl+C received, shutting down...");
+            tracing::info!("ctrl+c received, shutting down");
         }
     }
 
@@ -158,17 +158,17 @@ pub async fn start(ctx: ServerContext) -> Result<(), Box<dyn std::error::Error +
 
 #[cfg(all(feature = "profiling", not(target_env = "msvc")))]
 fn log_allocator() {
-    println!("[synapse-flow] global allocator: jemalloc");
+    tracing::info!("global allocator: jemalloc");
 }
 
 #[cfg(all(feature = "profiling", target_env = "msvc"))]
 fn log_allocator() {
-    println!("[synapse-flow] profiling enabled but using system allocator on MSVC");
+    tracing::info!("profiling enabled but using system allocator on MSVC");
 }
 
 #[cfg(not(feature = "profiling"))]
 fn log_allocator() {
-    println!("[synapse-flow] global allocator: system default");
+    tracing::info!("global allocator: system default");
 }
 
 #[cfg(feature = "profiling")]
@@ -180,15 +180,15 @@ fn start_profile_server(opts: &ServerOptions) {
     let addr: SocketAddr = match addr_str.parse() {
         Ok(a) => a,
         Err(err) => {
-            eprintln!("[ProfileServer] invalid profile addr {addr_str}: {err}");
+            tracing::error!(error = %err, profile_addr = %addr_str, "invalid profile addr");
             return;
         }
     };
 
-    println!("[ProfileServer] enabling profiling endpoints on {}", addr);
+    tracing::info!(profile_addr = %addr, "enabling profiling endpoints");
     thread::spawn(move || {
         if let Err(err) = run_profile_server(addr) {
-            eprintln!("[ProfileServer] server error: {err}");
+            tracing::error!(error = %err, "profile server error");
         }
     });
 }
@@ -199,19 +199,20 @@ fn start_profile_server(_opts: &ServerOptions) {}
 #[cfg(feature = "profiling")]
 fn run_profile_server(addr: SocketAddr) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr)?;
-    println!(
-        "[ProfileServer] CPU/heap endpoints at http://{addr}/debug/pprof/{{profile,flamegraph,heap}}"
+    tracing::info!(
+        profile_addr = %addr,
+        "CPU/heap endpoints at http://{addr}/debug/pprof/{{profile,flamegraph,heap}}"
     );
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 thread::spawn(|| {
                     if let Err(err) = handle_profile_connection(stream) {
-                        eprintln!("[ProfileServer] connection failed: {err}");
+                        tracing::error!(error = %err, "profile connection failed");
                     }
                 });
             }
-            Err(err) => eprintln!("[ProfileServer] accept error: {err}"),
+            Err(err) => tracing::error!(error = %err, "profile accept error"),
         }
     }
     Ok(())
@@ -389,7 +390,7 @@ async fn init_metrics_exporter(
         .clone()
         .unwrap_or_else(|| DEFAULT_METRICS_ADDR.to_string())
         .parse()?;
-    println!("[synapse-flow] enabling metrics exporter at {}", addr);
+    tracing::info!(metrics_addr = %addr, "enabling metrics exporter");
     let exporter = prometheus_exporter::start(addr)?;
     // Leak exporter handle so the HTTP endpoint stays alive for the duration of the process.
     Box::leak(Box::new(exporter));

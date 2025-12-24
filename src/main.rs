@@ -47,22 +47,23 @@ impl CliFlags {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    println!(
-        "[build_info] git_sha={} git_tag={}",
-        build_info::git_sha(),
-        build_info::git_tag()
-    );
-
     let cli_flags = CliFlags::parse();
-    let config = if let Some(path) = cli_flags.config_path() {
+    let (config, loaded_config_path) = if let Some(path) = cli_flags.config_path() {
         let cfg = synapse_flow::config::AppConfig::load_required(path)?;
-        println!("[synapse-flow] loaded config: {}", path);
-        cfg
+        (cfg, Some(path.to_string()))
     } else {
-        synapse_flow::config::AppConfig::default()
+        (synapse_flow::config::AppConfig::default(), None)
     };
 
     let _logging_guard = synapse_flow::logging::init_logging(&config.logging)?;
+    if let Some(path) = loaded_config_path.as_deref() {
+        tracing::info!(config_path = path, "loaded config");
+    }
+    tracing::info!(
+        git_sha = build_info::git_sha(),
+        git_tag = build_info::git_tag(),
+        "build info"
+    );
 
     let mut options = config.to_server_options();
     if let Some(dir) = cli_flags.data_dir() {
