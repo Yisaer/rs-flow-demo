@@ -1,7 +1,9 @@
 //! Decoder abstractions for turning raw bytes into RecordBatch collections.
 
 use crate::model::{CollectionError, Message, RecordBatch, Tuple};
-use datatypes::{ConcreteDatatype, ListType, ListValue, Schema, StructField, StructType, StructValue, Value};
+use datatypes::{
+    ConcreteDatatype, ListType, ListValue, Schema, StructField, StructType, StructValue, Value,
+};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::sync::Arc;
 
@@ -395,7 +397,9 @@ fn json_to_value_with_datatype(value: &JsonValue, datatype: &ConcreteDatatype) -
         | ConcreteDatatype::Float64(_)
         | ConcreteDatatype::String(_) => json_to_value(value),
         ConcreteDatatype::List(list_type) => json_to_list_value_with_datatype(value, list_type),
-        ConcreteDatatype::Struct(struct_type) => json_to_struct_value_with_datatype(value, struct_type),
+        ConcreteDatatype::Struct(struct_type) => {
+            json_to_struct_value_with_datatype(value, struct_type)
+        }
     }
 }
 
@@ -433,7 +437,10 @@ fn json_to_struct_value_with_datatype(value: &JsonValue, struct_type: &StructTyp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datatypes::{ColumnSchema, ConcreteDatatype, Int64Type, Schema, StringType, StructField, StructType, Value};
+    use datatypes::{
+        ColumnSchema, ConcreteDatatype, Int64Type, Schema, StringType, StructField, StructType,
+        Value,
+    };
     use serde_json::Map as JsonMap;
 
     #[test]
@@ -494,13 +501,12 @@ mod tests {
 
     #[test]
     fn json_decoder_respects_struct_schema_fields() {
-        let struct_type = ConcreteDatatype::Struct(StructType::new(Arc::new(vec![
-            StructField::new(
+        let struct_type =
+            ConcreteDatatype::Struct(StructType::new(Arc::new(vec![StructField::new(
                 "c".to_string(),
                 ConcreteDatatype::Int64(Int64Type),
                 false,
-            ),
-        ])));
+            )])));
 
         let schema = Arc::new(Schema::new(vec![ColumnSchema::new(
             "orders".to_string(),
@@ -521,13 +527,12 @@ mod tests {
 
     #[test]
     fn json_decoder_respects_list_struct_schema_fields() {
-        let element_type = ConcreteDatatype::Struct(StructType::new(Arc::new(vec![
-            StructField::new(
+        let element_type =
+            ConcreteDatatype::Struct(StructType::new(Arc::new(vec![StructField::new(
                 "c".to_string(),
                 ConcreteDatatype::Int64(Int64Type),
                 false,
-            ),
-        ])));
+            )])));
 
         let schema = Arc::new(Schema::new(vec![ColumnSchema::new(
             "orders".to_string(),

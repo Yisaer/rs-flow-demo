@@ -335,10 +335,7 @@ fn validate_expr_against_sources(
             let column_type = infer_expr_datatype(column.as_ref(), sources)?;
             if let Some(dtype) = column_type {
                 if !matches!(dtype, ConcreteDatatype::List(_)) {
-                    return Err(format!(
-                        "list index requires List type, got {:?}",
-                        dtype
-                    ));
+                    return Err(format!("list index requires List type, got {:?}", dtype));
                 }
             }
             validate_expr_against_sources(column.as_ref(), sources)?;
@@ -358,9 +355,9 @@ fn validate_expr_against_sources(
         Expr::Function(func) => {
             for arg in &func.args {
                 match arg {
-                    sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Expr(
-                        expr,
-                    )) => validate_expr_against_sources(expr, sources)?,
+                    sqlparser::ast::FunctionArg::Unnamed(
+                        sqlparser::ast::FunctionArgExpr::Expr(expr),
+                    ) => validate_expr_against_sources(expr, sources)?,
                     sqlparser::ast::FunctionArg::Named {
                         arg: sqlparser::ast::FunctionArgExpr::Expr(expr),
                         ..
@@ -391,10 +388,7 @@ fn validate_expr_against_sources(
             Ok(())
         }
         Expr::Between {
-            expr,
-            low,
-            high,
-            ..
+            expr, low, high, ..
         } => {
             validate_expr_against_sources(expr.as_ref(), sources)?;
             validate_expr_against_sources(low.as_ref(), sources)?;
@@ -1128,16 +1122,8 @@ mod logical_plan_tests {
     #[test]
     fn test_rejects_unknown_list_struct_field_during_logical_planning() {
         let items_struct = ConcreteDatatype::Struct(StructType::new(Arc::new(vec![
-            StructField::new(
-                "c".to_string(),
-                ConcreteDatatype::Int64(Int64Type),
-                false,
-            ),
-            StructField::new(
-                "d".to_string(),
-                ConcreteDatatype::String(StringType),
-                false,
-            ),
+            StructField::new("c".to_string(), ConcreteDatatype::Int64(Int64Type), false),
+            StructField::new("d".to_string(), ConcreteDatatype::String(StringType), false),
         ])));
 
         let schema = Arc::new(Schema::new(vec![
@@ -1165,6 +1151,9 @@ mod logical_plan_tests {
 
         let select_stmt = parse_sql("SELECT a, items[0]->b FROM stream_3").unwrap();
         let err = create_logical_plan(select_stmt, Vec::new(), &stream_defs).unwrap_err();
-        assert!(err.contains("field `b` not found"), "unexpected error: {err}");
+        assert!(
+            err.contains("field `b` not found"),
+            "unexpected error: {err}"
+        );
     }
 }

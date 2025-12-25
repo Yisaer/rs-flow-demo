@@ -852,15 +852,17 @@ fn find_binding_entry<'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use super::*;
+    use crate::planner::logical::create_logical_plan;
+    use crate::{
+        optimize_logical_plan, MqttStreamProps, StreamDecoderConfig, StreamDefinition, StreamProps,
+    };
     use datatypes::{
         ColumnSchema, ConcreteDatatype, Int64Type, ListType, Schema, StringType, StructField,
         StructType,
     };
     use parser::parse_sql;
-    use crate::{optimize_logical_plan, MqttStreamProps, StreamDecoderConfig, StreamDefinition, StreamProps};
-    use crate::planner::logical::create_logical_plan;
-    use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_physical_plan_builder_creation() {
@@ -880,16 +882,8 @@ mod tests {
         use crate::{AggregateFunctionRegistry, PipelineRegistries};
 
         let user_struct = ConcreteDatatype::Struct(StructType::new(Arc::new(vec![
-            StructField::new(
-                "c".to_string(),
-                ConcreteDatatype::Int64(Int64Type),
-                false,
-            ),
-            StructField::new(
-                "d".to_string(),
-                ConcreteDatatype::String(StringType),
-                false,
-            ),
+            StructField::new("c".to_string(), ConcreteDatatype::Int64(Int64Type), false),
+            StructField::new("d".to_string(), ConcreteDatatype::String(StringType), false),
         ])));
 
         let schema = Arc::new(Schema::new(vec![
@@ -939,7 +933,7 @@ mod tests {
             &pruned_binding,
             &registries,
         )
-            .expect("physical plan");
+        .expect("physical plan");
         let report = crate::planner::explain::ExplainReport::from_physical(physical);
         let topology = report.topology_string();
         println!("{topology}");
@@ -954,16 +948,8 @@ mod tests {
         use crate::{AggregateFunctionRegistry, PipelineRegistries};
 
         let element_struct = ConcreteDatatype::Struct(StructType::new(Arc::new(vec![
-            StructField::new(
-                "c".to_string(),
-                ConcreteDatatype::Int64(Int64Type),
-                false,
-            ),
-            StructField::new(
-                "d".to_string(),
-                ConcreteDatatype::String(StringType),
-                false,
-            ),
+            StructField::new("c".to_string(), ConcreteDatatype::Int64(Int64Type), false),
+            StructField::new("d".to_string(), ConcreteDatatype::String(StringType), false),
         ])));
 
         let schema = Arc::new(Schema::new(vec![
@@ -1032,24 +1018,12 @@ mod tests {
         use crate::{AggregateFunctionRegistry, PipelineRegistries};
 
         let element_struct = ConcreteDatatype::Struct(StructType::new(Arc::new(vec![
-            StructField::new(
-                "x".to_string(),
-                ConcreteDatatype::Int64(Int64Type),
-                false,
-            ),
-            StructField::new(
-                "y".to_string(),
-                ConcreteDatatype::String(StringType),
-                false,
-            ),
+            StructField::new("x".to_string(), ConcreteDatatype::Int64(Int64Type), false),
+            StructField::new("y".to_string(), ConcreteDatatype::String(StringType), false),
         ])));
 
         let b_struct = ConcreteDatatype::Struct(StructType::new(Arc::new(vec![
-            StructField::new(
-                "c".to_string(),
-                ConcreteDatatype::Int64(Int64Type),
-                false,
-            ),
+            StructField::new("c".to_string(), ConcreteDatatype::Int64(Int64Type), false),
             StructField::new(
                 "items".to_string(),
                 ConcreteDatatype::List(ListType::new(Arc::new(element_struct))),

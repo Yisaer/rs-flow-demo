@@ -310,9 +310,11 @@ impl<'a> ColumnUsageCollector<'a> {
     }
 
     fn mark_column_used(&mut self, source_name: &str, column_name: &str) {
-        let tree = self.used_columns.entry(source_name.to_string()).or_default();
-        tree.columns
-            .insert(column_name.to_string(), ColumnUse::All);
+        let tree = self
+            .used_columns
+            .entry(source_name.to_string())
+            .or_default();
+        tree.columns.insert(column_name.to_string(), ColumnUse::All);
     }
 
     fn record_struct_field_access(&mut self, access: StructFieldAccess) {
@@ -321,10 +323,9 @@ impl<'a> ColumnUsageCollector<'a> {
             return;
         }
 
-        let Some(source_name) = self.resolve_source_for_column(
-            access.qualifier.as_deref(),
-            access.column.as_str(),
-        ) else {
+        let Some(source_name) =
+            self.resolve_source_for_column(access.qualifier.as_deref(), access.column.as_str())
+        else {
             return;
         };
         self.mark_field_path_used(&source_name, access.column.as_str(), &access.field_path);
@@ -374,12 +375,13 @@ impl<'a> ColumnUsageCollector<'a> {
     }
 
     fn mark_field_path_used(&mut self, source_name: &str, column_name: &str, path: &[String]) {
-        let tree = self.used_columns.entry(source_name.to_string()).or_default();
+        let tree = self
+            .used_columns
+            .entry(source_name.to_string())
+            .or_default();
         let Some(root_use) = tree.columns.get_mut(column_name) else {
-            tree.columns.insert(
-                column_name.to_string(),
-                ColumnUse::Fields(HashMap::new()),
-            );
+            tree.columns
+                .insert(column_name.to_string(), ColumnUse::Fields(HashMap::new()));
             return self.mark_field_path_used(source_name, column_name, path);
         };
 
@@ -545,16 +547,18 @@ fn extract_list_element_struct_field_access(expr: &SqlExpr) -> Option<StructFiel
     })
 }
 
-fn prune_column_schema(column: &datatypes::ColumnSchema, usage: &ColumnUse) -> datatypes::ColumnSchema {
+fn prune_column_schema(
+    column: &datatypes::ColumnSchema,
+    usage: &ColumnUse,
+) -> datatypes::ColumnSchema {
     let data_type = prune_datatype(&column.data_type, usage);
-    datatypes::ColumnSchema::new(
-        column.source_name.clone(),
-        column.name.clone(),
-        data_type,
-    )
+    datatypes::ColumnSchema::new(column.source_name.clone(), column.name.clone(), data_type)
 }
 
-fn prune_datatype(datatype: &datatypes::ConcreteDatatype, usage: &ColumnUse) -> datatypes::ConcreteDatatype {
+fn prune_datatype(
+    datatype: &datatypes::ConcreteDatatype,
+    usage: &ColumnUse,
+) -> datatypes::ConcreteDatatype {
     match usage {
         ColumnUse::All => datatype.clone(),
         ColumnUse::Fields(fields) => match datatype {
@@ -835,16 +839,8 @@ mod tests {
     #[test]
     fn logical_optimizer_prunes_struct_fields_and_explain_renders_projection() {
         let user_struct = ConcreteDatatype::Struct(StructType::new(Arc::new(vec![
-            StructField::new(
-                "c".to_string(),
-                ConcreteDatatype::Int64(Int64Type),
-                false,
-            ),
-            StructField::new(
-                "d".to_string(),
-                ConcreteDatatype::String(StringType),
-                false,
-            ),
+            StructField::new("c".to_string(), ConcreteDatatype::Int64(Int64Type), false),
+            StructField::new("d".to_string(), ConcreteDatatype::String(StringType), false),
         ])));
 
         let schema = Arc::new(Schema::new(vec![
@@ -887,16 +883,8 @@ mod tests {
     #[test]
     fn logical_explain_reflects_pruned_list_struct_schema() {
         let element_struct = ConcreteDatatype::Struct(StructType::new(Arc::new(vec![
-            StructField::new(
-                "c".to_string(),
-                ConcreteDatatype::Int64(Int64Type),
-                false,
-            ),
-            StructField::new(
-                "d".to_string(),
-                ConcreteDatatype::String(StringType),
-                false,
-            ),
+            StructField::new("c".to_string(), ConcreteDatatype::Int64(Int64Type), false),
+            StructField::new("d".to_string(), ConcreteDatatype::String(StringType), false),
         ])));
 
         let schema = Arc::new(Schema::new(vec![

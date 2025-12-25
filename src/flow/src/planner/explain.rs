@@ -333,7 +333,11 @@ fn format_column_projection(column: &datatypes::ColumnSchema) -> String {
             format_struct_fields_projection(struct_type)
         ),
         ConcreteDatatype::List(list_type) => {
-            format!("{}[{}]", column.name, format_list_item_projection(list_type))
+            format!(
+                "{}[{}]",
+                column.name,
+                format_list_item_projection(list_type)
+            )
         }
         _ => column.name.clone(),
     }
@@ -366,7 +370,11 @@ fn format_struct_field_projection(field: &StructField) -> String {
             format_struct_fields_projection(struct_type)
         ),
         ConcreteDatatype::List(list_type) => {
-            format!("{}[{}]", field.name(), format_list_item_projection(list_type))
+            format!(
+                "{}[{}]",
+                field.name(),
+                format_list_item_projection(list_type)
+            )
         }
         _ => field.name().to_string(),
     }

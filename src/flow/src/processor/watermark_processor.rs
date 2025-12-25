@@ -315,7 +315,11 @@ impl SlidingWatermarkProcessor {
         let (output, _) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
         let (control_output, _) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
         let (lookahead, strategy) = match &physical.config {
-            WatermarkConfig::Sliding { lookahead, strategy, .. } => (*lookahead, strategy),
+            WatermarkConfig::Sliding {
+                lookahead,
+                strategy,
+                ..
+            } => (*lookahead, strategy),
             _ => panic!("SlidingWatermarkProcessor requires WatermarkConfig::Sliding"),
         };
         let lookahead = lookahead.map(Duration::from_secs);
