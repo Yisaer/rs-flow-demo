@@ -2,9 +2,6 @@ use datatypes::{ColumnSchema, ConcreteDatatype, Int64Type, Schema, Value};
 use flow::catalog::{Catalog, MockStreamProps, StreamDecoderConfig, StreamDefinition, StreamProps};
 use flow::codec::JsonDecoder;
 use flow::connector::{MockSourceConnector, MqttClientManager};
-use flow::planner::sink::{
-    NopSinkConfig, PipelineSink, PipelineSinkConnector, SinkConnectorConfig,
-};
 use flow::processor::StreamData;
 use flow::{shared_stream_registry, PipelineRegistries, SharedStreamConfig};
 use serde_json::Map as JsonMap;
