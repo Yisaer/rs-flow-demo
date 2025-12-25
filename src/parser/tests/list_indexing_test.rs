@@ -137,6 +137,7 @@ fn test_list_indexing_mixed_with_operations() {
     }
 }
 
+
 #[test]
 fn test_list_indexing_function_call() {
     // Test list indexing in function calls

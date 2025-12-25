@@ -1,4 +1,5 @@
 use crate::expr::sql_conversion::{SchemaBinding, SchemaBindingEntry};
+use crate::planner::decode_projection::{DecodeProjection, FieldPath, FieldPathSegment, ListIndex};
 use crate::planner::logical::{LogicalPlan, TailPlan};
 use datatypes::Schema;
 use sqlparser::ast::{Expr as SqlExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName};
@@ -72,7 +73,8 @@ impl LogicalOptRule for ColumnPruning {
         let mut collector = ColumnUsageCollector::new(bindings, self.eventtime_enabled);
         collector.collect_from_plan(plan.as_ref());
         let pruned = collector.build_pruned_binding();
-        let updated_plan = apply_pruned_schemas_to_logical(plan, &pruned);
+        let decode_projections = collector.build_decode_projections();
+        let updated_plan = apply_pruned_schemas_to_logical(plan, &pruned, &decode_projections);
         (updated_plan, pruned)
     }
 }
@@ -81,6 +83,7 @@ impl LogicalOptRule for ColumnPruning {
 struct ColumnUsageCollector<'a> {
     bindings: &'a SchemaBinding,
     used_columns: HashMap<String, UsedColumnTree>,
+    decode_projections: HashMap<String, DecodeProjection>,
     /// Sources for which pruning is disabled (e.g., wildcard or ambiguous)
     prune_disabled: HashSet<String>,
     eventtime_enabled: bool,
@@ -102,6 +105,7 @@ impl<'a> ColumnUsageCollector<'a> {
         Self {
             bindings,
             used_columns: HashMap::new(),
+            decode_projections: HashMap::new(),
             prune_disabled: HashSet::new(),
             eventtime_enabled,
         }
@@ -181,19 +185,25 @@ impl<'a> ColumnUsageCollector<'a> {
             SqlExpr::Nested(expr) => self.collect_expr_ast(expr),
             SqlExpr::Cast { expr, .. } => self.collect_expr_ast(expr),
             SqlExpr::JsonAccess { left, right, .. } => {
-                if let Some(access) = extract_struct_field_access(expr) {
-                    self.record_struct_field_access(access);
-                } else if let Some(access) = extract_list_element_struct_field_access(expr) {
-                    self.record_struct_field_access(access);
+                if let Some(access) = extract_decode_field_path_access(expr) {
+                    self.record_decode_field_path_access(access);
+                    self.collect_map_access_keys(expr);
                 } else {
                     self.collect_expr_ast(left);
                     self.collect_expr_ast(right);
                 }
             }
             SqlExpr::MapAccess { column, keys } => {
-                self.collect_expr_ast(column);
-                for key in keys {
-                    self.collect_expr_ast(key);
+                if let Some(access) = extract_decode_field_path_access(expr) {
+                    self.record_decode_field_path_access(access);
+                    for key in keys {
+                        self.collect_expr_ast(key);
+                    }
+                } else {
+                    self.collect_expr_ast(column);
+                    for key in keys {
+                        self.collect_expr_ast(key);
+                    }
                 }
             }
             _ => {}
@@ -315,10 +325,15 @@ impl<'a> ColumnUsageCollector<'a> {
             .entry(source_name.to_string())
             .or_default();
         tree.columns.insert(column_name.to_string(), ColumnUse::All);
+        let projection = self
+            .decode_projections
+            .entry(source_name.to_string())
+            .or_default();
+        projection.mark_column_all(column_name);
     }
 
-    fn record_struct_field_access(&mut self, access: StructFieldAccess) {
-        if access.field_path.is_empty() {
+    fn record_decode_field_path_access(&mut self, access: DecodeFieldPathAccess) {
+        if access.segments.is_empty() {
             self.record_identifier(access.qualifier.as_deref(), &Ident::new(access.column));
             return;
         }
@@ -328,7 +343,18 @@ impl<'a> ColumnUsageCollector<'a> {
         else {
             return;
         };
-        self.mark_field_path_used(&source_name, access.column.as_str(), &access.field_path);
+
+        let schema_path = decode_segments_to_schema_path(access.segments.as_slice());
+        self.mark_field_path_used(&source_name, access.column.as_str(), &schema_path);
+
+        let projection = self
+            .decode_projections
+            .entry(source_name.to_string())
+            .or_default();
+        projection.mark_field_path_used(&FieldPath {
+            column: access.column,
+            segments: access.segments,
+        });
     }
 
     fn resolve_source_for_column(
@@ -463,23 +489,59 @@ impl<'a> ColumnUsageCollector<'a> {
 
         SchemaBinding::new(entries)
     }
+
+    fn build_decode_projections(&self) -> HashMap<String, DecodeProjection> {
+        let mut projections = HashMap::new();
+        for entry in self.bindings.entries() {
+            let should_keep_full = matches!(
+                entry.kind,
+                crate::expr::sql_conversion::SourceBindingKind::Shared
+            ) || self.prune_disabled.contains(&entry.source_name)
+                || !self.used_columns.contains_key(&entry.source_name);
+
+            if should_keep_full {
+                continue;
+            }
+
+            if let Some(projection) = self.decode_projections.get(&entry.source_name) {
+                projections.insert(entry.source_name.clone(), projection.clone());
+            }
+        }
+        projections
+    }
+
+    fn collect_map_access_keys(&mut self, expr: &SqlExpr) {
+        match expr {
+            SqlExpr::MapAccess { keys, .. } => {
+                for key in keys {
+                    self.collect_expr_ast(key);
+                }
+            }
+            SqlExpr::JsonAccess { left, right, .. } => {
+                self.collect_map_access_keys(left.as_ref());
+                self.collect_map_access_keys(right.as_ref());
+            }
+            SqlExpr::Nested(inner) => self.collect_map_access_keys(inner.as_ref()),
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct StructFieldAccess {
+struct DecodeFieldPathAccess {
     qualifier: Option<String>,
     column: String,
-    field_path: Vec<String>,
+    segments: Vec<FieldPathSegment>,
 }
 
-fn extract_struct_field_access(expr: &SqlExpr) -> Option<StructFieldAccess> {
-    let (base, fields) = extract_json_access_chain(expr)?;
-    let (qualifier, column) = split_compound_identifier(&base)?;
-    Some(StructFieldAccess {
-        qualifier,
-        column,
-        field_path: fields,
-    })
+fn decode_segments_to_schema_path(segments: &[FieldPathSegment]) -> Vec<String> {
+    segments
+        .iter()
+        .map(|segment| match segment {
+            FieldPathSegment::StructField(field) => field.clone(),
+            FieldPathSegment::ListIndex(_) => "element".to_string(),
+        })
+        .collect()
 }
 
 fn split_compound_identifier(idents: &[Ident]) -> Option<(Option<String>, String)> {
@@ -495,56 +557,95 @@ fn split_compound_identifier(idents: &[Ident]) -> Option<(Option<String>, String
     Some((Some(qualifier), last.value.clone()))
 }
 
-fn extract_json_access_chain(expr: &SqlExpr) -> Option<(Vec<Ident>, Vec<String>)> {
+fn extract_decode_field_path_access(expr: &SqlExpr) -> Option<DecodeFieldPathAccess> {
+    let (base, segments) = extract_decode_access_chain(expr)?;
+    let (qualifier, column) = split_compound_identifier(&base)?;
+    Some(DecodeFieldPathAccess {
+        qualifier,
+        column,
+        segments,
+    })
+}
+
+fn extract_decode_access_chain(expr: &SqlExpr) -> Option<(Vec<Ident>, Vec<FieldPathSegment>)> {
     match expr {
+        SqlExpr::Nested(inner) => extract_decode_access_chain(inner.as_ref()),
+        SqlExpr::Identifier(ident) => Some((vec![ident.clone()], Vec::new())),
+        SqlExpr::CompoundIdentifier(idents) => Some((idents.clone(), Vec::new())),
         SqlExpr::JsonAccess {
             left,
             operator: sqlparser::ast::JsonOperator::Arrow,
             right,
         } => {
-            let (base, mut fields) = extract_json_access_chain(left.as_ref())
-                .or_else(|| extract_json_access_base(left.as_ref()).map(|b| (b, Vec::new())))?;
-            let field_name = match right.as_ref() {
-                SqlExpr::Identifier(ident) => ident.value.clone(),
-                _ => return None,
-            };
-            fields.push(field_name);
-            Some((base, fields))
+            let (base, mut segments) = extract_decode_access_chain(left.as_ref())?;
+            if !append_relative_access_expr_segments(right.as_ref(), &mut segments) {
+                return None;
+            }
+            Some((base, segments))
+        }
+        SqlExpr::MapAccess { column, keys } => {
+            let (base, mut segments) = extract_decode_access_chain(column.as_ref())?;
+            for key in keys {
+                match extract_const_non_negative_index(key) {
+                    Some(index) => segments.push(FieldPathSegment::ListIndex(ListIndex::Const(index))),
+                    None => segments.push(FieldPathSegment::ListIndex(ListIndex::Dynamic)),
+                }
+            }
+            Some((base, segments))
         }
         _ => None,
     }
 }
 
-fn extract_json_access_base(expr: &SqlExpr) -> Option<Vec<Ident>> {
+fn append_relative_access_expr_segments(expr: &SqlExpr, out: &mut Vec<FieldPathSegment>) -> bool {
     match expr {
-        SqlExpr::Identifier(ident) => Some(vec![ident.clone()]),
-        SqlExpr::CompoundIdentifier(idents) => Some(idents.clone()),
-        _ => None,
+        SqlExpr::Nested(inner) => append_relative_access_expr_segments(inner.as_ref(), out),
+        SqlExpr::Identifier(ident) => {
+            out.push(FieldPathSegment::StructField(ident.value.clone()));
+            true
+        }
+        SqlExpr::MapAccess { column, keys } => {
+            let column = match column.as_ref() {
+                SqlExpr::Nested(inner) => inner.as_ref(),
+                other => other,
+            };
+            let SqlExpr::Identifier(ident) = column else {
+                return false;
+            };
+            out.push(FieldPathSegment::StructField(ident.value.clone()));
+            for key in keys {
+                match extract_const_non_negative_index(key) {
+                    Some(index) => out.push(FieldPathSegment::ListIndex(ListIndex::Const(index))),
+                    None => out.push(FieldPathSegment::ListIndex(ListIndex::Dynamic)),
+                }
+            }
+            true
+        }
+        SqlExpr::JsonAccess {
+            left,
+            operator: sqlparser::ast::JsonOperator::Arrow,
+            right,
+        } => {
+            append_relative_access_expr_segments(left.as_ref(), out)
+                && append_relative_access_expr_segments(right.as_ref(), out)
+        }
+        _ => false,
     }
 }
 
-fn extract_list_element_struct_field_access(expr: &SqlExpr) -> Option<StructFieldAccess> {
-    let SqlExpr::JsonAccess { left, right, .. } = expr else {
-        return None;
-    };
-
-    let SqlExpr::MapAccess { column, .. } = left.as_ref() else {
-        return None;
-    };
-
-    let base_idents = extract_json_access_base(column.as_ref())?;
-    let (qualifier, column) = split_compound_identifier(&base_idents)?;
-
-    let field_name = match right.as_ref() {
-        SqlExpr::Identifier(ident) => ident.value.clone(),
-        _ => return None,
-    };
-
-    Some(StructFieldAccess {
-        qualifier,
-        column,
-        field_path: vec!["element".to_string(), field_name],
-    })
+fn extract_const_non_negative_index(expr: &SqlExpr) -> Option<usize> {
+    match expr {
+        SqlExpr::Value(sqlparser::ast::Value::Number(num, _)) => num.parse::<usize>().ok(),
+        SqlExpr::UnaryOp {
+            op: sqlparser::ast::UnaryOperator::Minus,
+            expr,
+        } => match expr.as_ref() {
+            SqlExpr::Value(sqlparser::ast::Value::Number(_, _)) => None,
+            _ => None,
+        },
+        SqlExpr::Nested(inner) => extract_const_non_negative_index(inner.as_ref()),
+        _ => None,
+    }
 }
 
 fn prune_column_schema(
@@ -599,14 +700,16 @@ fn prune_datatype(
 fn apply_pruned_schemas_to_logical(
     plan: Arc<LogicalPlan>,
     bindings: &SchemaBinding,
+    decode_projections: &HashMap<String, DecodeProjection>,
 ) -> Arc<LogicalPlan> {
     let mut cache = HashMap::new();
-    apply_pruned_with_cache(plan, bindings, &mut cache)
+    apply_pruned_with_cache(plan, bindings, decode_projections, &mut cache)
 }
 
 fn apply_pruned_with_cache(
     plan: Arc<LogicalPlan>,
     bindings: &SchemaBinding,
+    decode_projections: &HashMap<String, DecodeProjection>,
     cache: &mut HashMap<i64, Arc<LogicalPlan>>,
 ) -> Arc<LogicalPlan> {
     let idx = plan.get_plan_index();
@@ -622,11 +725,13 @@ fn apply_pruned_with_cache(
                 .find(|entry| entry.source_name == ds.source_name)
                 .map(|entry| Arc::clone(&entry.schema))
                 .unwrap_or_else(|| ds.schema());
-            if Arc::ptr_eq(&schema, &ds.schema) {
+            let decode_projection = decode_projections.get(&ds.source_name).cloned();
+            if Arc::ptr_eq(&schema, &ds.schema) && ds.decode_projection == decode_projection {
                 plan
             } else {
                 let mut new_ds = ds.clone();
                 new_ds.schema = schema;
+                new_ds.decode_projection = decode_projection;
                 Arc::new(LogicalPlan::DataSource(new_ds))
             }
         }
@@ -634,7 +739,9 @@ fn apply_pruned_with_cache(
             let new_children: Vec<Arc<LogicalPlan>> = plan
                 .children()
                 .iter()
-                .map(|child| apply_pruned_with_cache(child.clone(), bindings, cache))
+                .map(|child| {
+                    apply_pruned_with_cache(child.clone(), bindings, decode_projections, cache)
+                })
                 .collect();
 
             let children_unchanged = plan
@@ -925,6 +1032,63 @@ mod tests {
         let report = ExplainReport::from_logical(optimized);
         let topology = report.topology_string();
         println!("{topology}");
-        assert!(topology.contains("schema=[a, items[struct{c}]]"));
+        assert!(topology.contains("schema=[a, items[0][struct{c}]]"));
+    }
+
+    #[test]
+    fn logical_explain_renders_list_index_projection_compact() {
+        let element_struct = ConcreteDatatype::Struct(StructType::new(Arc::new(vec![
+            StructField::new("x".to_string(), ConcreteDatatype::Int64(Int64Type), false),
+            StructField::new("y".to_string(), ConcreteDatatype::String(StringType), false),
+        ])));
+
+        let b_struct = ConcreteDatatype::Struct(StructType::new(Arc::new(vec![
+            StructField::new("c".to_string(), ConcreteDatatype::Int64(Int64Type), false),
+            StructField::new(
+                "items".to_string(),
+                ConcreteDatatype::List(ListType::new(Arc::new(element_struct))),
+                false,
+            ),
+        ])));
+
+        let schema = Arc::new(Schema::new(vec![
+            ColumnSchema::new(
+                "stream_4".to_string(),
+                "a".to_string(),
+                ConcreteDatatype::Int64(Int64Type),
+            ),
+            ColumnSchema::new(
+                "stream_4".to_string(),
+                "b".to_string(),
+                b_struct,
+            ),
+        ]));
+
+        let definition = StreamDefinition::new(
+            "stream_4",
+            Arc::clone(&schema),
+            StreamProps::Mqtt(MqttStreamProps::default()),
+            StreamDecoderConfig::json(),
+        );
+        let mut stream_defs = HashMap::new();
+        stream_defs.insert("stream_4".to_string(), Arc::new(definition));
+
+        let select_stmt = parse_sql("SELECT stream_4.a, stream_4.b->items[0]->x, stream_4.b->items[3]->x FROM stream_4")
+            .expect("parse sql");
+        let logical_plan =
+            create_logical_plan(select_stmt, vec![], &stream_defs).expect("logical plan");
+
+        let bindings = SchemaBinding::new(vec![SchemaBindingEntry {
+            source_name: "stream_4".to_string(),
+            alias: None,
+            schema: Arc::clone(&schema),
+            kind: crate::expr::sql_conversion::SourceBindingKind::Regular,
+        }]);
+
+        let (optimized, _pruned) = optimize_logical_plan(Arc::clone(&logical_plan), &bindings);
+        let report = ExplainReport::from_logical(optimized);
+        let topology = report.topology_string();
+        println!("{topology}");
+        assert!(topology.contains("schema=[a, b{items[0,3][struct{x}]}]"));
     }
 }
