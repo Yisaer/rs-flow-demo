@@ -80,11 +80,21 @@ impl LogicalOptRule for ColumnPruning {
 /// Collects column usage for pruning decisions.
 struct ColumnUsageCollector<'a> {
     bindings: &'a SchemaBinding,
-    /// Map of source_name -> set of referenced column names
-    used_columns: HashMap<String, HashSet<String>>,
+    used_columns: HashMap<String, UsedColumnTree>,
     /// Sources for which pruning is disabled (e.g., wildcard or ambiguous)
     prune_disabled: HashSet<String>,
     eventtime_enabled: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct UsedColumnTree {
+    columns: HashMap<String, ColumnUse>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ColumnUse {
+    All,
+    Fields(HashMap<String, ColumnUse>),
 }
 
 impl<'a> ColumnUsageCollector<'a> {
@@ -137,10 +147,7 @@ impl<'a> ColumnUsageCollector<'a> {
             LogicalPlan::DataSource(ds) => {
                 if self.eventtime_enabled {
                     if let Some(eventtime) = ds.eventtime() {
-                        self.used_columns
-                            .entry(ds.source_name.clone())
-                            .or_default()
-                            .insert(eventtime.column().to_string());
+                        self.mark_column_used(&ds.source_name, eventtime.column());
                     }
                 }
             }
@@ -174,8 +181,12 @@ impl<'a> ColumnUsageCollector<'a> {
             SqlExpr::Nested(expr) => self.collect_expr_ast(expr),
             SqlExpr::Cast { expr, .. } => self.collect_expr_ast(expr),
             SqlExpr::JsonAccess { left, right, .. } => {
-                self.collect_expr_ast(left);
-                self.collect_expr_ast(right);
+                if let Some(access) = extract_struct_field_access(expr) {
+                    self.record_struct_field_access(access);
+                } else {
+                    self.collect_expr_ast(left);
+                    self.collect_expr_ast(right);
+                }
             }
             SqlExpr::MapAccess { column, keys } => {
                 self.collect_expr_ast(column);
@@ -232,10 +243,7 @@ impl<'a> ColumnUsageCollector<'a> {
             Some(q) => {
                 if let Some(entry) = self.bindings.entries().iter().find(|b| b.matches(q)) {
                     if entry.schema.contains_column(column_name) {
-                        self.used_columns
-                            .entry(entry.source_name.clone())
-                            .or_default()
-                            .insert(column_name.to_string());
+                        self.mark_column_used(&entry.source_name, column_name);
                     } else {
                         self.prune_disabled.insert(entry.source_name.clone());
                     }
@@ -253,10 +261,7 @@ impl<'a> ColumnUsageCollector<'a> {
                 match matches.len() {
                     0 => self.disable_pruning_for_all_sources(),
                     1 => {
-                        self.used_columns
-                            .entry(matches[0].clone())
-                            .or_default()
-                            .insert(column_name.to_string());
+                        self.mark_column_used(&matches[0], column_name);
                     }
                     _ => {
                         // Ambiguous: keep all matching sources unpruned.
@@ -302,6 +307,108 @@ impl<'a> ColumnUsageCollector<'a> {
         self.record_identifier(qualifier.as_deref(), column);
     }
 
+    fn mark_column_used(&mut self, source_name: &str, column_name: &str) {
+        let tree = self.used_columns.entry(source_name.to_string()).or_default();
+        tree.columns
+            .insert(column_name.to_string(), ColumnUse::All);
+    }
+
+    fn record_struct_field_access(&mut self, access: StructFieldAccess) {
+        if access.field_path.is_empty() {
+            self.record_identifier(access.qualifier.as_deref(), &Ident::new(access.column));
+            return;
+        }
+
+        let Some(source_name) = self.resolve_source_for_column(
+            access.qualifier.as_deref(),
+            access.column.as_str(),
+        ) else {
+            return;
+        };
+        self.mark_field_path_used(&source_name, access.column.as_str(), &access.field_path);
+    }
+
+    fn resolve_source_for_column(
+        &mut self,
+        qualifier: Option<&str>,
+        column_name: &str,
+    ) -> Option<String> {
+        match qualifier {
+            Some(q) => {
+                if let Some(entry) = self.bindings.entries().iter().find(|b| b.matches(q)) {
+                    if entry.schema.contains_column(column_name) {
+                        Some(entry.source_name.clone())
+                    } else {
+                        self.prune_disabled.insert(entry.source_name.clone());
+                        None
+                    }
+                } else {
+                    self.disable_pruning_for_all_sources();
+                    None
+                }
+            }
+            None => {
+                let mut matches = Vec::new();
+                for entry in self.bindings.entries() {
+                    if entry.schema.contains_column(column_name) {
+                        matches.push(entry.source_name.clone());
+                    }
+                }
+                match matches.len() {
+                    0 => {
+                        self.disable_pruning_for_all_sources();
+                        None
+                    }
+                    1 => Some(matches[0].clone()),
+                    _ => {
+                        for src in matches {
+                            self.prune_disabled.insert(src);
+                        }
+                        None
+                    }
+                }
+            }
+        }
+    }
+
+    fn mark_field_path_used(&mut self, source_name: &str, column_name: &str, path: &[String]) {
+        let tree = self.used_columns.entry(source_name.to_string()).or_default();
+        let Some(root_use) = tree.columns.get_mut(column_name) else {
+            tree.columns.insert(
+                column_name.to_string(),
+                ColumnUse::Fields(HashMap::new()),
+            );
+            return self.mark_field_path_used(source_name, column_name, path);
+        };
+
+        if matches!(root_use, ColumnUse::All) {
+            return;
+        }
+
+        let mut current = root_use;
+        for (idx, segment) in path.iter().enumerate() {
+            let is_leaf = idx + 1 == path.len();
+            match current {
+                ColumnUse::All => return,
+                ColumnUse::Fields(map) => {
+                    if is_leaf {
+                        match map.get(segment.as_str()) {
+                            Some(ColumnUse::All) => {}
+                            _ => {
+                                map.insert(segment.clone(), ColumnUse::All);
+                            }
+                        }
+                        return;
+                    }
+                    if !map.contains_key(segment.as_str()) {
+                        map.insert(segment.clone(), ColumnUse::Fields(HashMap::new()));
+                    }
+                    current = map.get_mut(segment.as_str()).expect("inserted above");
+                }
+            }
+        }
+    }
+
     fn resolve_source(&self, qualifier: &str) -> Option<String> {
         self.bindings
             .entries()
@@ -333,8 +440,10 @@ impl<'a> ColumnUsageCollector<'a> {
                     .schema
                     .column_schemas()
                     .iter()
-                    .filter(|col| required.contains(&col.name))
-                    .cloned()
+                    .filter_map(|col| {
+                        let usage = required.columns.get(col.name.as_str())?;
+                        Some(prune_column_schema(col, usage))
+                    })
                     .collect();
                 Arc::new(Schema::new(filtered))
             };
@@ -349,6 +458,106 @@ impl<'a> ColumnUsageCollector<'a> {
         }
 
         SchemaBinding::new(entries)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StructFieldAccess {
+    qualifier: Option<String>,
+    column: String,
+    field_path: Vec<String>,
+}
+
+fn extract_struct_field_access(expr: &SqlExpr) -> Option<StructFieldAccess> {
+    let (base, fields) = extract_json_access_chain(expr)?;
+    let (qualifier, column) = split_compound_identifier(&base)?;
+    Some(StructFieldAccess {
+        qualifier,
+        column,
+        field_path: fields,
+    })
+}
+
+fn split_compound_identifier(idents: &[Ident]) -> Option<(Option<String>, String)> {
+    let last = idents.last()?;
+    if idents.len() == 1 {
+        return Some((None, last.value.clone()));
+    }
+    let qualifier = idents[..idents.len() - 1]
+        .iter()
+        .map(|i| i.value.clone())
+        .collect::<Vec<_>>()
+        .join(".");
+    Some((Some(qualifier), last.value.clone()))
+}
+
+fn extract_json_access_chain(expr: &SqlExpr) -> Option<(Vec<Ident>, Vec<String>)> {
+    match expr {
+        SqlExpr::JsonAccess {
+            left,
+            operator,
+            right,
+        } => match operator {
+            sqlparser::ast::JsonOperator::Arrow => {
+                let (base, mut fields) = extract_json_access_chain(left.as_ref())
+                    .or_else(|| extract_json_access_base(left.as_ref()).map(|b| (b, Vec::new())))?;
+                let field_name = match right.as_ref() {
+                    SqlExpr::Identifier(ident) => ident.value.clone(),
+                    _ => return None,
+                };
+                fields.push(field_name);
+                Some((base, fields))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn extract_json_access_base(expr: &SqlExpr) -> Option<Vec<Ident>> {
+    match expr {
+        SqlExpr::Identifier(ident) => Some(vec![ident.clone()]),
+        SqlExpr::CompoundIdentifier(idents) => Some(idents.clone()),
+        _ => None,
+    }
+}
+
+fn prune_column_schema(column: &datatypes::ColumnSchema, usage: &ColumnUse) -> datatypes::ColumnSchema {
+    let data_type = prune_datatype(&column.data_type, usage);
+    datatypes::ColumnSchema::new(
+        column.source_name.clone(),
+        column.name.clone(),
+        data_type,
+    )
+}
+
+fn prune_datatype(datatype: &datatypes::ConcreteDatatype, usage: &ColumnUse) -> datatypes::ConcreteDatatype {
+    match usage {
+        ColumnUse::All => datatype.clone(),
+        ColumnUse::Fields(fields) => match datatype {
+            datatypes::ConcreteDatatype::Struct(struct_type) => {
+                let mut pruned_fields = Vec::new();
+                for field in struct_type.fields().iter() {
+                    let Some(field_usage) = fields.get(field.name()) else {
+                        continue;
+                    };
+                    let pruned = prune_datatype(field.data_type(), field_usage);
+                    pruned_fields.push(datatypes::StructField::new(
+                        field.name().to_string(),
+                        pruned,
+                        field.is_nullable(),
+                    ));
+                }
+                if pruned_fields.is_empty() {
+                    datatype.clone()
+                } else {
+                    datatypes::ConcreteDatatype::Struct(datatypes::StructType::new(Arc::new(
+                        pruned_fields,
+                    )))
+                }
+            }
+            _ => datatype.clone(),
+        },
     }
 }
 
@@ -462,7 +671,7 @@ mod tests {
     use crate::catalog::{MqttStreamProps, StreamDecoderConfig, StreamDefinition, StreamProps};
     use crate::planner::explain::ExplainReport;
     use crate::planner::logical::create_logical_plan;
-    use datatypes::{ColumnSchema, ConcreteDatatype, Int64Type, Schema};
+    use datatypes::{ColumnSchema, ConcreteDatatype, Int64Type, Schema, StringType, StructField, StructType};
     use parser::parse_sql;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -588,5 +797,57 @@ mod tests {
 
         // Avoid unused warning for optimized plan.
         assert_eq!(optimized.get_plan_type(), "Project");
+    }
+
+    #[test]
+    fn logical_optimizer_prunes_struct_fields_and_explain_renders_projection() {
+        let user_struct = ConcreteDatatype::Struct(StructType::new(Arc::new(vec![
+            StructField::new(
+                "c".to_string(),
+                ConcreteDatatype::Int64(Int64Type),
+                false,
+            ),
+            StructField::new(
+                "d".to_string(),
+                ConcreteDatatype::String(StringType),
+                false,
+            ),
+        ])));
+
+        let schema = Arc::new(Schema::new(vec![
+            ColumnSchema::new(
+                "stream_2".to_string(),
+                "a".to_string(),
+                ConcreteDatatype::Int64(Int64Type),
+            ),
+            ColumnSchema::new("stream_2".to_string(), "b".to_string(), user_struct),
+        ]));
+
+        let definition = StreamDefinition::new(
+            "stream_2",
+            Arc::clone(&schema),
+            StreamProps::Mqtt(MqttStreamProps::default()),
+            StreamDecoderConfig::json(),
+        );
+        let mut stream_defs = HashMap::new();
+        stream_defs.insert("stream_2".to_string(), Arc::new(definition));
+
+        let select_stmt =
+            parse_sql("SELECT stream_2.a, stream_2.b->c FROM stream_2").expect("parse sql");
+        let logical_plan =
+            create_logical_plan(select_stmt, vec![], &stream_defs).expect("logical plan");
+
+        let bindings = SchemaBinding::new(vec![SchemaBindingEntry {
+            source_name: "stream_2".to_string(),
+            alias: None,
+            schema: Arc::clone(&schema),
+            kind: crate::expr::sql_conversion::SourceBindingKind::Regular,
+        }]);
+
+        let (optimized, _pruned) = optimize_logical_plan(Arc::clone(&logical_plan), &bindings);
+        let report = ExplainReport::from_logical(optimized);
+        let topology = report.topology_string();
+        println!("{topology}");
+        assert!(topology.contains("schema=[a, b{c}]"));
     }
 }

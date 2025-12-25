@@ -1,6 +1,7 @@
 use super::{logical::LogicalPlan, physical::PhysicalPlan};
 use crate::planner::logical::{DataSinkPlan, LogicalWindowSpec};
 use crate::planner::physical::{WatermarkConfig, WatermarkStrategy};
+use datatypes::{ConcreteDatatype, Schema, StructField, StructType};
 use serde::Serialize;
 use sqlparser::ast::Expr;
 use std::sync::Arc;
@@ -208,13 +209,7 @@ fn build_logical_node(plan: &Arc<LogicalPlan>) -> ExplainNode {
                 info.push(format!("alias={}", alias));
             }
             info.push(format!("decoder={}", ds.decoder().kind()));
-            let cols: Vec<String> = ds
-                .schema
-                .column_schemas()
-                .iter()
-                .map(|c| c.name.clone())
-                .collect();
-            info.push(format!("schema=[{}]", cols.join(", ")));
+            info.push(format_schema(ds.schema.as_ref()));
         }
         LogicalPlan::StatefulFunction(stateful) => {
             let mut mappings = stateful
@@ -318,6 +313,46 @@ fn build_logical_node(plan: &Arc<LogicalPlan>) -> ExplainNode {
     }
 }
 
+fn format_schema(schema: &Schema) -> String {
+    let cols: Vec<String> = schema
+        .column_schemas()
+        .iter()
+        .map(format_column_projection)
+        .collect();
+    format!("schema=[{}]", cols.join(", "))
+}
+
+fn format_column_projection(column: &datatypes::ColumnSchema) -> String {
+    match &column.data_type {
+        ConcreteDatatype::Struct(struct_type) => format!(
+            "{}{{{}}}",
+            column.name,
+            format_struct_fields_projection(struct_type)
+        ),
+        _ => column.name.clone(),
+    }
+}
+
+fn format_struct_fields_projection(struct_type: &StructType) -> String {
+    struct_type
+        .fields()
+        .iter()
+        .map(format_struct_field_projection)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn format_struct_field_projection(field: &StructField) -> String {
+    match field.data_type() {
+        ConcreteDatatype::Struct(struct_type) => format!(
+            "{}{{{}}}",
+            field.name(),
+            format_struct_fields_projection(struct_type)
+        ),
+        _ => field.name().to_string(),
+    }
+}
+
 fn build_physical_node(plan: &Arc<PhysicalPlan>) -> ExplainNode {
     build_physical_node_with_prefix(plan, None, None)
 }
@@ -337,23 +372,11 @@ fn build_physical_node_with_prefix(
             if let Some(alias) = ds.alias() {
                 info.push(format!("alias={}", alias));
             }
-            let cols: Vec<String> = ds
-                .schema()
-                .column_schemas()
-                .iter()
-                .map(|c| c.name.clone())
-                .collect();
-            info.push(format!("schema=[{}]", cols.join(", ")));
+            info.push(format_schema(ds.schema().as_ref()));
         }
         PhysicalPlan::Decoder(decoder) => {
             info.push(format!("decoder={}", decoder.decoder().kind()));
-            let cols: Vec<String> = decoder
-                .schema()
-                .column_schemas()
-                .iter()
-                .map(|c| c.name.clone())
-                .collect();
-            info.push(format!("schema=[{}]", cols.join(", ")));
+            info.push(format_schema(decoder.schema().as_ref()));
             if let Some(eventtime) = decoder.eventtime() {
                 info.push(format!("eventtime.column={}", eventtime.column_name));
                 info.push(format!("eventtime.type={}", eventtime.type_key));
@@ -365,13 +388,7 @@ fn build_physical_node_with_prefix(
             if let Some(alias) = ds.alias() {
                 info.push(format!("alias={}", alias));
             }
-            let cols: Vec<String> = ds
-                .schema()
-                .column_schemas()
-                .iter()
-                .map(|c| c.name.clone())
-                .collect();
-            info.push(format!("schema=[{}]", cols.join(", ")));
+            info.push(format_schema(ds.schema().as_ref()));
         }
         PhysicalPlan::StatefulFunction(stateful) => {
             let mut calls = stateful
