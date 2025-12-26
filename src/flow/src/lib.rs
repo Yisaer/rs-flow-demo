@@ -147,6 +147,12 @@ impl PipelineRegistries {
     }
 }
 
+impl Default for PipelineRegistries {
+    fn default() -> Self {
+        Self::new_with_builtin()
+    }
+}
+
 fn build_physical_plan_from_sql(
     sql: &str,
     sinks: Vec<PipelineSink>,
