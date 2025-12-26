@@ -1,1 +1,1 @@
-mod physical_explain_reflects_pruned_struct_schema;
+mod plan_explain_table_driven;
